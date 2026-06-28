@@ -25,6 +25,7 @@ DB_PATH = Path(__file__).parent / "ucat.db"
 
 _USE_PG: bool | None = None
 _DB_URL: str = ""
+_BOOTSTRAPPED: bool = False
 
 
 def _setup() -> bool:
@@ -260,6 +261,13 @@ _PG_TABLES = [
 
 
 def init_db():
+    """Create tables, seed starter content on first run, and backfill any
+    newer seed content into an already-populated database. The work runs once
+    per process — Streamlit reruns this script on every interaction, so the
+    guard keeps each rerun cheap."""
+    global _BOOTSTRAPPED
+    if _BOOTSTRAPPED:
+        return
     conn = get_conn()
     try:
         if _setup():
@@ -272,6 +280,8 @@ def init_db():
     finally:
         _close(conn)
     seed_content()
+    backfill_content()
+    _BOOTSTRAPPED = True
 
 
 # ── Subjects ───────────────────────────────────────────────────────────────────
@@ -1016,3 +1026,69 @@ def seed_content():
         _commit(conn)
     finally:
         _close(conn)
+
+
+def backfill_content():
+    """Idempotently add any seed topics/questions/flashcards that are missing.
+
+    Unlike seed_content(), this runs even on an already-populated database, so
+    expanded starter content reaches an existing deployment (e.g. Neon) without
+    a manual reload. It only *adds* rows that are absent — matching questions by
+    stem and flashcards by (front, back) — and never updates or deletes, so any
+    user-edited or user-created content is left untouched.
+    """
+    subs = get_subjects()
+    if not subs:
+        return  # fresh database: seed_content() handles the initial load
+    code_to_id = {s["code"]: s["id"] for s in subs}
+    id_to_code = {v: k for k, v in code_to_id.items()}
+    added_t = added_q = added_f = 0
+    conn = get_conn()
+    try:
+        now = datetime.now().isoformat()
+        today = date.today().isoformat()
+
+        # Topics — map existing (code, name) → id, inserting any that are missing
+        topic_key_to_id = {}
+        for r in _q(conn, "SELECT id, subject_id, name FROM topics"):
+            code = id_to_code.get(r["subject_id"])
+            if code:
+                topic_key_to_id[(code, r["name"])] = r["id"]
+        for code, name, hy, summary, content in _TOPICS:
+            if code not in code_to_id or (code, name) in topic_key_to_id:
+                continue
+            tid = _run(conn, _n("""INSERT INTO topics (subject_id, name, high_yield, summary, content, created_at)
+                       VALUES (:s,:n,:hy,:sum,:c,:ca)"""),
+                       {"s": code_to_id[code], "n": name, "hy": hy, "sum": summary, "c": content, "ca": now})
+            topic_key_to_id[(code, name)] = tid
+            added_t += 1
+        _commit(conn)
+
+        # Questions — insert any whose stem is not already present
+        existing_stems = {r["stem"] for r in _q(conn, "SELECT stem FROM questions")}
+        for code, tname, stem, a, b, c, d, correct, expl, diff in _QUESTIONS:
+            if code not in code_to_id or stem in existing_stems:
+                continue
+            _run(conn, _n("""INSERT INTO questions (subject_id, topic_id, stem, option_a, option_b,
+                       option_c, option_d, correct, explanation, difficulty, created_at)
+                       VALUES (:s,:t,:stem,:a,:b,:c,:d,:cor,:e,:diff,:ca)"""),
+                 {"s": code_to_id[code], "t": topic_key_to_id.get((code, tname)), "stem": stem,
+                  "a": a, "b": b, "c": c, "d": d, "cor": correct, "e": expl, "diff": diff, "ca": now})
+            existing_stems.add(stem)
+            added_q += 1
+
+        # Flashcards — insert any whose (front, back) pair is not already present
+        existing_cards = {(r["front"], r["back"]) for r in _q(conn, "SELECT front, back FROM flashcards")}
+        for code, tname, front, back in _FLASHCARDS:
+            if code not in code_to_id or (front, back) in existing_cards:
+                continue
+            _run(conn, _n("""INSERT INTO flashcards (subject_id, topic_id, front, back, due_date, created_at)
+                       VALUES (:s,:t,:f,:b,:due,:ca)"""),
+                 {"s": code_to_id[code], "t": topic_key_to_id.get((code, tname)),
+                  "f": front, "b": back, "due": today, "ca": now})
+            existing_cards.add((front, back))
+            added_f += 1
+        _commit(conn)
+    finally:
+        _close(conn)
+    return {"topics_added": added_t, "questions_added": added_q, "flashcards_added": added_f}
