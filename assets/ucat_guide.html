@@ -1,0 +1,800 @@
+<meta charset="UTF-8">
+<title>The UCAT Playbook — A Complete Guide to a Top-Decile Score</title>
+<style>
+  :root{
+    --paper:#EFF1EC;
+    --paper-2:#FAFBF8;
+    --card:#FFFFFF;
+    --ink:#16211F;
+    --ink-soft:#4C5651;
+    --ink-faint:#78827C;
+    --line:#DBDFD6;
+    --line-strong:#C7CCC1;
+    --teal:#0C6B58;
+    --teal-bright:#0F8A70;
+    --teal-wash:#E4EFEA;
+    --coral:#C24A38;
+    --coral-wash:#F6E6E1;
+    --gold:#B5762A;
+    /* subtest hues */
+    --vr:#3B6488;
+    --dm:#6E5299;
+    --qr:#12795C;
+    --sjt:#B06A2C;
+    --step--1:.82rem;
+    --step-0:1rem;
+    --step-1:1.28rem;
+    --step-2:1.62rem;
+    --step-3:2.05rem;
+    --step-4:2.7rem;
+    --step-5:3.6rem;
+    --serif:"Charter","Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+    --wrap:1140px;
+    --read:44rem;
+  }
+  *{box-sizing:border-box}
+  html{font-size:112.5%;scroll-behavior:smooth}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  body{
+    margin:0;background:var(--paper);color:var(--ink);
+    font-family:var(--sans);line-height:1.65;
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+  }
+  ::selection{background:var(--teal);color:#fff}
+  a{color:var(--teal);text-decoration-thickness:1px;text-underline-offset:2px}
+  h1,h2,h3,h4{font-family:var(--serif);font-weight:600;line-height:1.12;text-wrap:balance;letter-spacing:-.01em}
+  p{margin:0 0 1em}
+  .wrap{max-width:var(--wrap);margin:0 auto;padding:0 1.5rem}
+  .read{max-width:var(--read)}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .eyebrow{
+    font-family:var(--mono);font-size:var(--step--1);letter-spacing:.18em;
+    text-transform:uppercase;color:var(--teal);font-weight:600;
+  }
+
+  /* ---------- top bar ---------- */
+  .topbar{
+    position:sticky;top:0;z-index:50;background:rgba(239,241,236,.86);
+    backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--line);
+  }
+  .progress{height:2px;background:var(--teal);width:0%;transition:width .1s linear}
+  @media (prefers-reduced-motion:reduce){.progress{transition:none}}
+  .topbar-inner{display:flex;align-items:center;gap:1.2rem;padding:.55rem 1.5rem;max-width:var(--wrap);margin:0 auto}
+  .brand{font-family:var(--serif);font-weight:700;font-size:1.02rem;white-space:nowrap;letter-spacing:-.01em}
+  .brand b{color:var(--teal)}
+  nav.jump{display:flex;gap:.15rem;overflow-x:auto;scrollbar-width:none;margin-left:auto}
+  nav.jump::-webkit-scrollbar{display:none}
+  nav.jump a{
+    font-family:var(--mono);font-size:.74rem;letter-spacing:.02em;color:var(--ink-soft);
+    text-decoration:none;padding:.34rem .55rem;border-radius:6px;white-space:nowrap;transition:background .15s,color .15s;
+  }
+  nav.jump a:hover{background:var(--teal-wash);color:var(--teal)}
+  nav.jump a.active{color:var(--teal);background:var(--teal-wash)}
+
+  /* ---------- hero ---------- */
+  .hero{position:relative;overflow:hidden;border-bottom:1px solid var(--line)}
+  #ecg{position:absolute;inset:0;width:100%;height:100%;opacity:.5}
+  .hero-inner{position:relative;max-width:var(--wrap);margin:0 auto;padding:4.4rem 1.5rem 3.4rem}
+  .hero h1{font-size:var(--step-5);margin:.5rem 0 .35rem;max-width:16ch}
+  .hero .lede{font-size:var(--step-1);color:var(--ink-soft);max-width:40ch;margin:0 0 1.8rem}
+  .hero .lede b{color:var(--ink);font-weight:600}
+  .stat-strip{display:flex;flex-wrap:wrap;gap:0;border:1px solid var(--line-strong);border-radius:12px;overflow:hidden;background:var(--card);max-width:640px}
+  .stat-strip .cell{flex:1 1 0;min-width:120px;padding:.9rem 1.1rem;border-right:1px solid var(--line)}
+  .stat-strip .cell:last-child{border-right:0}
+  .stat-strip .n{font-family:var(--serif);font-size:1.7rem;font-weight:700;line-height:1;color:var(--teal)}
+  .stat-strip .k{font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);margin-top:.4rem}
+  @media (max-width:560px){.hero h1{font-size:var(--step-4)}}
+
+  /* ---------- sections ---------- */
+  section{padding:3.4rem 0;border-bottom:1px solid var(--line)}
+  section:target{scroll-margin-top:56px}
+  .sec-head{display:flex;align-items:baseline;gap:.8rem;margin-bottom:.4rem}
+  .sec-head .num{font-family:var(--mono);font-size:.8rem;color:var(--ink-faint);font-weight:600}
+  h2{font-size:var(--step-3);margin:.1rem 0 .2rem}
+  .sec-intro{color:var(--ink-soft);max-width:52ch;font-size:1.05rem;margin-bottom:2rem}
+
+  /* ---------- glance cards ---------- */
+  .grid{display:grid;gap:1rem}
+  .cards4{grid-template-columns:repeat(4,1fr)}
+  @media (max-width:900px){.cards4{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:520px){.cards4{grid-template-columns:1fr}}
+  .subcard{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:1.1rem 1.15rem;position:relative;overflow:hidden}
+  .subcard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--h)}
+  .subcard .tag{font-family:var(--mono);font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--h);font-weight:700}
+  .subcard h3{font-size:1.12rem;margin:.25rem 0 .7rem}
+  .subcard dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:.28rem .8rem;font-size:.86rem}
+  .subcard dt{color:var(--ink-faint);font-family:var(--mono);font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;align-self:center}
+  .subcard dd{margin:0;font-family:var(--mono);font-variant-numeric:tabular-nums;font-weight:600;text-align:right}
+  .totrow{display:flex;flex-wrap:wrap;gap:1rem;margin-top:1rem}
+  .totpill{flex:1 1 160px;background:var(--ink);color:var(--paper);border-radius:12px;padding:1rem 1.15rem}
+  .totpill .n{font-family:var(--serif);font-size:1.9rem;font-weight:700;line-height:1}
+  .totpill .k{font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;opacity:.7;margin-top:.4rem}
+  .totpill.accent{background:var(--teal)}
+
+  /* ---------- tables ---------- */
+  .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--card)}
+  table{border-collapse:collapse;width:100%;font-size:.9rem;min-width:460px}
+  th,td{padding:.7rem .95rem;text-align:left;border-bottom:1px solid var(--line)}
+  thead th{font-family:var(--mono);font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;background:var(--paper-2)}
+  tbody tr:last-child td{border-bottom:0}
+  td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  tbody tr:hover{background:var(--teal-wash)}
+  .band td:first-child{font-weight:700;font-family:var(--mono)}
+
+  /* ---------- score checker ---------- */
+  .checker{background:var(--card);border:1px solid var(--line-strong);border-radius:14px;padding:1.4rem 1.5rem;margin-top:1.6rem}
+  .checker h3{font-size:1.15rem;margin:0 0 .2rem}
+  .checker .hint{font-size:.85rem;color:var(--ink-faint);margin:0 0 1.2rem}
+  .sliders{display:grid;gap:1rem}
+  .srow{display:grid;grid-template-columns:5.5rem 1fr 3.2rem;align-items:center;gap:1rem}
+  .srow label{font-family:var(--mono);font-size:.8rem;font-weight:600;letter-spacing:.03em}
+  .srow output{font-family:var(--mono);font-weight:700;text-align:right;font-variant-numeric:tabular-nums}
+  input[type=range]{-webkit-appearance:none;appearance:none;height:6px;border-radius:4px;background:var(--line-strong);outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:20px;height:20px;border-radius:50%;background:var(--teal);cursor:pointer;border:3px solid var(--card);box-shadow:0 0 0 1px var(--teal)}
+  input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:var(--teal);cursor:pointer;border:3px solid var(--card);box-shadow:0 0 0 1px var(--teal)}
+  input[type=range]:focus-visible{box-shadow:0 0 0 3px var(--teal-wash)}
+  .verdict{margin-top:1.3rem;padding-top:1.2rem;border-top:1px dashed var(--line-strong);display:flex;flex-wrap:wrap;align-items:center;gap:1.2rem}
+  .verdict .big{font-family:var(--serif);font-size:2.6rem;font-weight:700;line-height:1;color:var(--teal)}
+  .verdict .lbl{font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);display:block;margin-top:.3rem}
+  .verdict .txt{flex:1 1 220px}
+  .verdict .txt .tier{font-family:var(--serif);font-size:1.3rem;font-weight:700;display:block;margin-bottom:.1rem}
+  .meter{height:9px;border-radius:5px;background:linear-gradient(90deg,#d9ddd3,var(--teal));position:relative;margin-top:1rem;overflow:hidden}
+  .meter .mk{position:absolute;top:-4px;width:3px;height:17px;background:var(--coral);border-radius:2px;transition:left .25s ease}
+  @media (prefers-reduced-motion:reduce){.meter .mk{transition:none}}
+  .meter-scale{display:flex;justify-content:space-between;font-family:var(--mono);font-size:.66rem;color:var(--ink-faint);margin-top:.4rem}
+
+  /* ---------- deep dive ---------- */
+  .dive{display:grid;grid-template-columns:1fr;gap:0}
+  .dive-head{display:flex;align-items:center;gap:1rem;margin-bottom:1.2rem;flex-wrap:wrap}
+  .badge{width:2.6rem;height:2.6rem;border-radius:10px;display:grid;place-items:center;color:#fff;font-family:var(--mono);font-weight:700;font-size:.95rem;flex:none;background:var(--h)}
+  .dive-head h3{font-size:var(--step-2);margin:0}
+  .microstat{display:flex;gap:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-left:auto;background:var(--card)}
+  .microstat .c{padding:.45rem .8rem;border-right:1px solid var(--line);text-align:center}
+  .microstat .c:last-child{border-right:0}
+  .microstat .v{font-family:var(--mono);font-weight:700;font-size:.95rem;color:var(--h)}
+  .microstat .l{font-family:var(--mono);font-size:.6rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-faint)}
+  .colw{columns:2;column-gap:2.4rem}
+  @media (max-width:760px){.colw{columns:1}.microstat{margin-left:0;width:100%}}
+  .block{break-inside:avoid;margin-bottom:1.5rem}
+  .block h4{font-size:1rem;margin:0 0 .45rem;display:flex;align-items:center;gap:.5rem}
+  .block h4::before{content:"";width:.6rem;height:.6rem;border-radius:2px;background:var(--h);flex:none}
+  .block ul{margin:.2rem 0 0;padding-left:1.15rem}
+  .block li{margin-bottom:.4rem}
+  .block li::marker{color:var(--h)}
+  .example{background:var(--paper-2);border:1px solid var(--line);border-left:4px solid var(--h);border-radius:0 10px 10px 0;padding:1rem 1.15rem;font-size:.92rem;margin-top:.6rem}
+  .example .q{font-family:var(--serif);font-weight:600;margin-bottom:.5rem}
+  .example .a{color:var(--ink-soft)}
+  .example .a b{color:var(--h)}
+  .trap{background:var(--coral-wash);border:1px solid #e9cfc7;border-radius:10px;padding:.5rem .9rem;font-size:.86rem;color:#8a3324;display:flex;gap:.5rem;margin-top:.3rem}
+  .trap b{color:var(--coral)}
+
+  /* ---------- timeline ---------- */
+  .timeline{display:grid;gap:0;position:relative;margin-top:1rem}
+  .phase{display:grid;grid-template-columns:auto 1fr;gap:1.3rem;padding-bottom:1.6rem;position:relative}
+  .phase::before{content:"";position:absolute;left:1.1rem;top:2.3rem;bottom:-.4rem;width:2px;background:var(--line-strong)}
+  .phase:last-child::before{display:none}
+  .dot{width:2.25rem;height:2.25rem;border-radius:50%;background:var(--teal);color:#fff;display:grid;place-items:center;font-family:var(--mono);font-weight:700;z-index:1;flex:none}
+  .phase h4{margin:.3rem 0 .15rem;font-size:1.12rem}
+  .phase .wk{font-family:var(--mono);font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;color:var(--coral);font-weight:600}
+  .phase p{margin:.35rem 0 0;color:var(--ink-soft);font-size:.94rem}
+
+  /* ---------- commandments ---------- */
+  .cmd{display:grid;grid-template-columns:repeat(2,1fr);gap:.7rem;margin-top:1rem;counter-reset:cmd}
+  @media (max-width:640px){.cmd{grid-template-columns:1fr}}
+  .cmd li{list-style:none;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.85rem 1rem .85rem 2.7rem;position:relative;font-size:.92rem}
+  .cmd li::before{counter-increment:cmd;content:counter(cmd,decimal-leading-zero);position:absolute;left:.9rem;top:.85rem;font-family:var(--mono);font-size:.78rem;font-weight:700;color:var(--teal)}
+  .cmd li b{font-weight:600}
+
+  /* ---------- callout ---------- */
+  .callout{background:var(--teal);color:var(--paper);border-radius:14px;padding:1.5rem 1.6rem;margin-top:1.5rem}
+  .callout h3{color:#fff;margin:0 0 .4rem;font-size:1.2rem}
+  .callout p{margin:0;opacity:.92}
+  .callout.warn{background:var(--coral)}
+
+  /* ---------- lists of resources ---------- */
+  .reslist{display:grid;gap:.7rem}
+  .res{display:grid;grid-template-columns:auto 1fr;gap:.9rem;align-items:start;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.85rem 1rem}
+  .res .k{font-family:var(--mono);font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:#fff;background:var(--ink-faint);padding:.2rem .45rem;border-radius:5px;white-space:nowrap;margin-top:.15rem}
+  .res.free .k{background:var(--teal)}
+  .res .b b{font-weight:600}
+  .res .b span{color:var(--ink-soft);font-size:.9rem}
+
+  footer{padding:2.6rem 0 3.2rem;background:var(--ink);color:var(--paper)}
+  footer .wrap{display:flex;flex-wrap:wrap;gap:1.5rem;justify-content:space-between;align-items:center}
+  footer .mark{font-family:var(--serif);font-weight:700;font-size:1.15rem}
+  footer .mark b{color:var(--teal-bright)}
+  footer p{margin:0;opacity:.7;font-size:.82rem;max-width:46ch}
+  footer a{color:var(--teal-bright)}
+
+  .fine{font-size:.8rem;color:var(--ink-faint);margin-top:1rem}
+</style>
+
+<div class="topbar">
+  <div class="progress" id="progress"></div>
+  <div class="topbar-inner">
+    <div class="brand">The UCAT <b>Playbook</b></div>
+    <nav class="jump" id="jump">
+      <a href="#glance">Format</a>
+      <a href="#scoring">Scoring</a>
+      <a href="#vr">VR</a>
+      <a href="#dm">DM</a>
+      <a href="#qr">QR</a>
+      <a href="#sjt">SJT</a>
+      <a href="#mechanics">Timing</a>
+      <a href="#plan">Plan</a>
+      <a href="#resources">Resources</a>
+      <a href="#examday">Exam day</a>
+      <a href="#mindset">Mindset</a>
+    </nav>
+  </div>
+</div>
+
+<header class="hero" id="top">
+  <canvas id="ecg"></canvas>
+  <div class="hero-inner">
+    <span class="eyebrow">University Clinical Aptitude Test · 2025 / 2026 cycle</span>
+    <h1>Score in the top decile.</h1>
+    <p class="lede">The UCAT is not a knowledge test — it is a <b>speed and decision test</b>. Everyone sitting it can do the maths and read the passage. The score gap is pace, technique, and nerve. This is the complete playbook for closing it.</p>
+    <div class="stat-strip">
+      <div class="cell"><div class="n">184</div><div class="k">Questions</div></div>
+      <div class="cell"><div class="n">111<span style="font-size:1rem"> min</span></div><div class="k">Testing time</div></div>
+      <div class="cell"><div class="n">4</div><div class="k">Subtests</div></div>
+      <div class="cell"><div class="n">2700</div><div class="k">Max score</div></div>
+    </div>
+  </div>
+</header>
+
+<main>
+
+<!-- ============ FORMAT ============ -->
+<section id="glance"><div class="wrap">
+  <div class="sec-head"><span class="num">01</span></div>
+  <h2>The exam at a glance</h2>
+  <p class="sec-intro">Four subtests, back to back, computer-based, at a Pearson VUE test centre. Abstract Reasoning was removed for the 2025 cycle — the three cognitive subtests below are what build your out-of-2700 score. Situational Judgement is scored separately as a band.</p>
+
+  <div class="grid cards4">
+    <div class="subcard" style="--h:var(--vr)">
+      <div class="tag">Verbal Reasoning</div>
+      <h3>Read fast, infer faster</h3>
+      <dl>
+        <dt>Questions</dt><dd>44</dd>
+        <dt>Time</dt><dd>22 min</dd>
+        <dt>Per Q</dt><dd>~30 s</dd>
+        <dt>Format</dt><dd>11 passages</dd>
+      </dl>
+    </div>
+    <div class="subcard" style="--h:var(--dm)">
+      <div class="tag">Decision Making</div>
+      <h3>Logic under a clock</h3>
+      <dl>
+        <dt>Questions</dt><dd>35</dd>
+        <dt>Time</dt><dd>37 min</dd>
+        <dt>Per Q</dt><dd>~63 s</dd>
+        <dt>Format</dt><dd>Standalone</dd>
+      </dl>
+    </div>
+    <div class="subcard" style="--h:var(--qr)">
+      <div class="tag">Quantitative Reasoning</div>
+      <h3>Applied numeracy</h3>
+      <dl>
+        <dt>Questions</dt><dd>36</dd>
+        <dt>Time</dt><dd>26 min</dd>
+        <dt>Per Q</dt><dd>~43 s</dd>
+        <dt>Format</dt><dd>Data sets</dd>
+      </dl>
+    </div>
+    <div class="subcard" style="--h:var(--sjt)">
+      <div class="tag">Situational Judgement</div>
+      <h3>Think like a doctor</h3>
+      <dl>
+        <dt>Questions</dt><dd>69</dd>
+        <dt>Time</dt><dd>26 min</dd>
+        <dt>Per Q</dt><dd>~23 s</dd>
+        <dt>Format</dt><dd>Scenarios</dd>
+      </dl>
+    </div>
+  </div>
+
+  <div class="totrow">
+    <div class="totpill accent"><div class="n">300–900</div><div class="k">Scaled per cognitive subtest</div></div>
+    <div class="totpill"><div class="n">Band 1–4</div><div class="k">SJT outcome (1 = best)</div></div>
+    <div class="totpill"><div class="n">No −marking</div><div class="k">Wrong answers never cost you</div></div>
+  </div>
+  <p class="fine">On-screen basic calculator (QR only), a laminated noteboard and pen at your desk. A short instruction screen precedes each subtest. There is no long scheduled break inside the 111 minutes — pace as one continuous sitting.</p>
+</div></section>
+
+<!-- ============ SCORING ============ -->
+<section id="scoring"><div class="wrap">
+  <div class="sec-head"><span class="num">02</span></div>
+  <h2>Scoring &amp; what actually counts as good</h2>
+  <p class="sec-intro">Raw marks in VR, DM and QR are converted to a scaled 300–900 each and summed to a total out of 2700. Universities weight this differently — some use hard cut-offs, some rank, some combine it with grades — so “good” is always relative to your target schools and this year’s cohort.</p>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>2025 cohort</th><th class="num">Total score</th><th>What it means</th></tr></thead>
+      <tbody>
+        <tr><td>Average</td><td class="num">≈ 1891</td><td>Roughly 630 per subtest</td></tr>
+        <tr><td>5th decile (median)</td><td class="num">1880</td><td>Middle of the pack</td></tr>
+        <tr><td>6th decile</td><td class="num">1950</td><td>Above average</td></tr>
+        <tr><td>8th decile</td><td class="num">2100</td><td><b>Top 20% — a strong, competitive score</b></td></tr>
+        <tr><td>Top few percent</td><td class="num">2300+</td><td>Outstanding; opens the most selective courses</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="fine">2025 decile ladder: 1st 1580 · 2nd 1680 · 3rd 1760 · 4th 1820 · 5th 1880 · 6th 1950 · 8th 2100. Boundaries drift a little each year, so treat these as guides, not guarantees.</p>
+
+  <h3 style="font-family:var(--serif);font-size:1.2rem;margin:2rem 0 .6rem">The SJT band — don’t neglect it</h3>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Band</th><th>Standing</th><th>Where it lands you</th></tr></thead>
+      <tbody class="band">
+        <tr><td style="color:var(--teal)">1</td><td>Excellent</td><td>Closest to the expert panel. Advantageous everywhere SJT is used.</td></tr>
+        <tr><td>2</td><td>Good</td><td>Most common outcome (~39% of candidates). Competitive at all schools.</td></tr>
+        <tr><td>3</td><td>Modest</td><td>Accepted by many, but a weakness where SJT is scored or ranked.</td></tr>
+        <tr><td style="color:var(--coral)">4</td><td>Concerning</td><td>~10% of candidates. Some schools will not consider Band 4 at all.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="checker" role="group" aria-label="UCAT score decile checker">
+    <h3>Score checker</h3>
+    <p class="hint">Drag your target scaled scores. The marker shows roughly where that total sits in the 2025 cohort.</p>
+    <div class="sliders">
+      <div class="srow"><label for="vrS">VR</label><input id="vrS" type="range" min="300" max="900" step="10" value="650"><output id="vrO">650</output></div>
+      <div class="srow"><label for="dmS">DM</label><input id="dmS" type="range" min="300" max="900" step="10" value="650"><output id="dmO">650</output></div>
+      <div class="srow"><label for="qrS">QR</label><input id="qrS" type="range" min="300" max="900" step="10" value="650"><output id="qrO">650</output></div>
+    </div>
+    <div class="meter"><div class="mk" id="mk"></div></div>
+    <div class="meter-scale"><span>1580</span><span>1880</span><span>2100</span><span>2340+</span></div>
+    <div class="verdict">
+      <div><div class="big" id="totalOut">1950</div><span class="lbl">Total / 2700</span></div>
+      <div class="txt"><span class="tier" id="tierOut">Above average</span><span id="descOut" style="color:var(--ink-soft);font-size:.92rem"></span></div>
+    </div>
+    <p class="fine">Estimates from 2025 percentile data — a planning tool, not an official prediction.</p>
+  </div>
+</div></section>
+
+<!-- ============ VR ============ -->
+<section id="vr"><div class="wrap">
+  <div class="sec-head"><span class="num">03</span></div>
+  <div class="dive-head" style="--h:var(--vr)">
+    <div class="badge">VR</div>
+    <h3>Verbal Reasoning</h3>
+    <div class="microstat"><div class="c"><div class="v">44 Q</div><div class="l">Count</div></div><div class="c"><div class="v">22 min</div><div class="l">Time</div></div><div class="c"><div class="v">30 s</div><div class="l">Per Q</div></div></div>
+  </div>
+  <p class="sec-intro">Eleven passages, four questions each, and only half a minute per question. You cannot read every word — VR is a test of controlled skimming and disciplined logic, judged <em>only</em> on what the passage says.</p>
+
+  <div class="colw" style="--h:var(--vr)">
+    <div class="block"><h4>What it tests</h4>
+      <ul>
+        <li>Comprehension and inference from dense, often dull text (science, history, policy).</li>
+        <li>Separating what is <b>stated</b> from what is merely plausible or true in the real world.</li>
+      </ul>
+    </div>
+    <div class="block"><h4>The two question types</h4>
+      <ul>
+        <li><b>True / False / Can’t Tell:</b> is a statement supported, contradicted, or simply not determinable from the passage?</li>
+        <li><b>Free-text / inference:</b> “the author would most agree…”, “which statement is best supported…” — pick the option grounded in the text.</li>
+      </ul>
+    </div>
+    <div class="block"><h4>Strategy that moves the needle</h4>
+      <ul>
+        <li><b>Question first, then hunt.</b> Read the statement, lift its keywords, scan the passage for them, decide. Don’t pre-read the whole passage.</li>
+        <li><b>Budget ~2 minutes per passage.</b> A stopwatch in your head beats a per-question one here.</li>
+        <li><b>Decode Can’t Tell:</b> if answering needs outside knowledge or an assumption the text never makes, it’s <b>Can’t Tell</b>, not True.</li>
+      </ul>
+    </div>
+    <div class="block"><h4>Common traps</h4>
+      <ul>
+        <li><b>Absolute words</b> — “all”, “never”, “only”, “always”. One counter-example in the text makes them False.</li>
+        <li><b>Your own knowledge.</b> If it’s true in life but unstated in the passage, it isn’t True here.</li>
+        <li><b>Sinking</b> three minutes into one brutal passage. Flag it, guess, move.</li>
+      </ul>
+    </div>
+    <div class="block"><h4>Worked micro-example</h4>
+      <div class="example">
+        <div class="q">Passage: “The clinic opened a second site in 2019 to reduce waiting times.” Statement: <i>Waiting times fell after 2019.</i></div>
+        <div class="a">Answer: <b>Can’t Tell.</b> The passage gives the <i>intent</i> (“to reduce”), never the outcome. Tempting as True — but nothing states times actually fell.</div>
+      </div>
+      <div class="trap"><b>⚠</b><span>“Reduce” describes a goal, not a result. Reading purpose as fact is the #1 VR error.</span></div>
+    </div>
+  </div>
+</div></section>
+
+<!-- ============ DM ============ -->
+<section id="dm"><div class="wrap">
+  <div class="sec-head"><span class="num">04</span></div>
+  <div class="dive-head" style="--h:var(--dm)">
+    <div class="badge">DM</div>
+    <h3>Decision Making</h3>
+    <div class="microstat"><div class="c"><div class="v">35 Q</div><div class="l">Count</div></div><div class="c"><div class="v">37 min</div><div class="l">Time</div></div><div class="c"><div class="v">63 s</div><div class="l">Per Q</div></div></div>
+  </div>
+  <p class="sec-intro">The most time-generous subtest — over a minute per question — and the one that rewards careful, structured reasoning over speed. Each question stands alone. Use the noteboard.</p>
+
+  <div class="colw" style="--h:var(--dm)">
+    <div class="block"><h4>What it tests</h4>
+      <ul>
+        <li>Logical puzzles and deductions from a set of conditions.</li>
+        <li>Syllogisms — which conclusions <b>must</b> follow from given statements.</li>
+        <li>Venn diagrams and set interpretation.</li>
+        <li>Recognising assumptions and picking the <b>strongest argument</b>.</li>
+        <li>Probability and basic statistical reasoning.</li>
+      </ul>
+    </div>
+    <div class="block"><h4>The scoring quirk to exploit</h4>
+      <ul>
+        <li>Some questions present <b>five statements</b> to mark Yes/No each. Get all right for full marks, most right for partial — so grind these out; even a near-miss scores.</li>
+      </ul>
+    </div>
+    <div class="block"><h4>Strategy that moves the needle</h4>
+      <ul>
+        <li><b>Draw it.</b> Venn diagrams and logic grids on the noteboard beat holding it in your head.</li>
+        <li><b>“Strongest argument”</b> = directly relevant + no logical flaw + addresses the actual question. Reject anything that generalises or answers a different question, even if it “sounds” sensible.</li>
+        <li><b>Syllogisms:</b> accept only conclusions that are <i>necessarily</i> true, never just probable.</li>
+        <li><b>Spend the time you’re given.</b> This is where accuracy pays — don’t rush what’s deliberately paced.</li>
+      </ul>
+    </div>
+    <div class="block"><h4>Worked micro-example</h4>
+      <div class="example">
+        <div class="q">“All members of the team are qualified. Some qualified people are first-aiders.” Conclusion: <i>Some team members are first-aiders.</i></div>
+        <div class="a">Answer: <b>No.</b> The team are all qualified, but the qualified first-aiders needn’t include any team member. It <i>could</i> be true — but it doesn’t <b>have</b> to be.</div>
+      </div>
+      <div class="trap"><b>⚠</b><span>“Could be true” ≠ “must be true”. DM only rewards necessity.</span></div>
+    </div>
+  </div>
+</div></section>
+
+<!-- ============ QR ============ -->
+<section id="qr"><div class="wrap">
+  <div class="sec-head"><span class="num">05</span></div>
+  <div class="dive-head" style="--h:var(--qr)">
+    <div class="badge">QR</div>
+    <h3>Quantitative Reasoning</h3>
+    <div class="microstat"><div class="c"><div class="v">36 Q</div><div class="l">Count</div></div><div class="c"><div class="v">26 min</div><div class="l">Time</div></div><div class="c"><div class="v">43 s</div><div class="l">Per Q</div></div></div>
+  </div>
+  <p class="sec-intro">The maths is only GCSE-level — the difficulty is doing it accurately in 43 seconds while reading a chart. Fluency with percentages and a fast hand on the on-screen calculator is worth more than any clever trick.</p>
+
+  <div class="colw" style="--h:var(--qr)">
+    <div class="block"><h4>What it tests</h4>
+      <ul>
+        <li>Percentages, percentage change and <b>reverse</b> percentages.</li>
+        <li>Ratios, proportion and best-value comparisons.</li>
+        <li>Rates — speed/distance/time, unit conversion.</li>
+        <li>Reading data from tables, graphs and charts.</li>
+        <li>Area, volume and simple geometry.</li>
+      </ul>
+    </div>
+    <div class="block"><h4>The calculator reality</h4>
+      <ul>
+        <li>It’s a <b>basic four-function</b> calculator you click — slow. Do simple sums in your head; reserve it for multi-step numbers.</li>
+        <li>Learn the <b>number-key shortcuts</b> so you type instead of click.</li>
+      </ul>
+    </div>
+    <div class="block"><h4>Strategy that moves the needle</h4>
+      <ul>
+        <li><b>Read the question before the data.</b> Only compute the one number asked — data sets bury a lot of decoys.</li>
+        <li><b>Guard your units.</b> £/pence, km/m, per-week vs per-year — the trap is almost always a unit switch.</li>
+        <li><b>Estimate to eliminate.</b> Ballpark first; if only one option is near, you may not need exact arithmetic.</li>
+        <li><b>Flag the calculation-heavy ones</b> and clear the quick wins first.</li>
+      </ul>
+    </div>
+    <div class="block"><h4>Worked micro-example</h4>
+      <div class="example">
+        <div class="q">A jacket costs £48 after a 20% discount. What was the original price?</div>
+        <div class="a">Answer: <b>£60.</b> £48 is 80% of the original, so original = 48 ÷ 0.8 = £60. <i>Not</i> £48 × 1.2 = £57.60 — that’s the reverse-percentage trap.</div>
+      </div>
+      <div class="trap"><b>⚠</b><span>Adding the % back on undershoots. Divide by the decimal multiplier instead.</span></div>
+    </div>
+  </div>
+</div></section>
+
+<!-- ============ SJT ============ -->
+<section id="sjt"><div class="wrap">
+  <div class="sec-head"><span class="num">06</span></div>
+  <div class="dive-head" style="--h:var(--sjt)">
+    <div class="badge">SJT</div>
+    <h3>Situational Judgement</h3>
+    <div class="microstat"><div class="c"><div class="v">69 Q</div><div class="l">Count</div></div><div class="c"><div class="v">26 min</div><div class="l">Time</div></div><div class="c"><div class="v">23 s</div><div class="l">Per Q</div></div></div>
+  </div>
+  <p class="sec-intro">Scenarios from clinical and student life, judged against a panel of medical experts. It looks like “common sense” — which is exactly why people under-prepare and land in Band 3. Learn the examiner’s value system and Band 1 is very reachable.</p>
+
+  <div class="colw" style="--h:var(--sjt)">
+    <div class="block"><h4>What it tests</h4>
+      <ul>
+        <li>Integrity, empathy, teamwork and coping under pressure — not medical knowledge.</li>
+        <li>How closely your judgement matches the professional consensus.</li>
+      </ul>
+    </div>
+    <div class="block"><h4>Question types</h4>
+      <ul>
+        <li><b>Appropriateness:</b> rate a response from “Very appropriate” to “Very inappropriate”.</li>
+        <li><b>Importance:</b> rate a consideration from “Very important” to “Not important at all”.</li>
+        <li><b>Most/least appropriate</b> from a set of options.</li>
+      </ul>
+    </div>
+    <div class="block"><h4>The examiner’s value system</h4>
+      <ul>
+        <li><b>Patient safety overrides everything.</b> If a patient is at risk, doing nothing is never appropriate.</li>
+        <li><b>Never cover up</b> or ignore a mistake — honesty and probity always score.</li>
+        <li><b>Escalate proportionately:</b> usually raise it with the person first, then go to a senior if needed.</li>
+        <li><b>Stay within your competence</b> and seek help when out of your depth — that’s a strength, not a failing.</li>
+        <li><b>Be non-judgemental</b> and protect confidentiality.</li>
+      </ul>
+    </div>
+    <div class="block"><h4>Worked micro-example</h4>
+      <div class="example">
+        <div class="q">A fellow student turns up to a hospital placement smelling of alcohol. Response: <i>“Say nothing to avoid embarrassing them.”</i></div>
+        <div class="a">Rating: <b>Very inappropriate.</b> Patient safety and professional standards outrank a colleague’s comfort. The appropriate path is to raise it — with them, and if needed a supervisor.</div>
+      </div>
+      <div class="trap"><b>⚠</b><span>Avoid the two extremes: never “ignore it”, but also rarely jump straight to reporting someone without first addressing it directly.</span></div>
+    </div>
+  </div>
+</div></section>
+
+<!-- ============ MECHANICS / TIMING ============ -->
+<section id="mechanics"><div class="wrap">
+  <div class="sec-head"><span class="num">07</span></div>
+  <h2>The interface &amp; the timing doctrine</h2>
+  <p class="sec-intro">More points are lost to the clock than to difficulty. The single biggest score lever for most candidates is not knowing more — it’s never leaving a question blank and never letting one question eat the time of three.</p>
+
+  <div class="grid cards4" style="grid-template-columns:repeat(3,1fr)">
+    <div class="subcard" style="--h:var(--teal)">
+      <div class="tag">Rule one</div><h3>Answer everything</h3>
+      <p style="font-size:.9rem;color:var(--ink-soft);margin:0">No negative marking. A blank and a wrong answer score the same — so a guess can only help. In the last seconds of every subtest, fill all remaining answers with one “banker” letter.</p>
+    </div>
+    <div class="subcard" style="--h:var(--coral)">
+      <div class="tag">Rule two</div><h3>Flag &amp; move</h3>
+      <p style="font-size:.9rem;color:var(--ink-soft);margin:0">Every subtest has a Flag button and a navigator. The moment a question runs long, flag it and go. Anchoring on one hard item is the classic way to run out of time with easy marks unanswered.</p>
+    </div>
+    <div class="subcard" style="--h:var(--gold)">
+      <div class="tag">Rule three</div><h3>Know your tools</h3>
+      <p style="font-size:.9rem;color:var(--ink-soft);margin:0">Calculator (QR only, number-key shortcuts), on-screen timer, flag/navigator, and a laminated noteboard + pen at your desk. Practise with these exact tools so exam day holds no surprises.</p>
+    </div>
+  </div>
+
+  <div class="callout">
+    <h3>Your per-question pace, memorised</h3>
+    <p>VR ≈ 30 s · DM ≈ 60 s · QR ≈ 43 s · SJT ≈ 23 s. You won’t watch the clock every question — but you should <em>feel</em> when you’ve overstayed. Internalise these four numbers and “flag &amp; move” becomes automatic.</p>
+  </div>
+</div></section>
+
+<!-- ============ PLAN ============ -->
+<section id="plan"><div class="wrap">
+  <div class="sec-head"><span class="num">08</span></div>
+  <h2>The preparation plan</h2>
+  <p class="sec-intro">Six to eight focused weeks beats months of drift. The pattern that works: learn the technique first, drill weaknesses second, then live almost entirely inside full timed mocks. Review is where the score is made — analysing <em>why</em> each answer was wrong is worth more than doing another hundred questions.</p>
+
+  <div class="timeline">
+    <div class="phase">
+      <div class="dot">1</div>
+      <div>
+        <span class="wk">Weeks 1–2 · Foundations</span>
+        <h4>Learn the game before playing it</h4>
+        <p>Sit one diagnostic to find your weak subtest. Learn the format and the strategy for each section (this guide). Practise <b>untimed</b> — you’re building correct method, not speed yet. Start daily mental-maths and speed-reading warm-ups.</p>
+      </div>
+    </div>
+    <div class="phase">
+      <div class="dot">2</div>
+      <div>
+        <span class="wk">Weeks 3–5 · Targeted drilling</span>
+        <h4>Attack your weaknesses, then add the clock</h4>
+        <p>Drill by subtest and question type, hardest area first. Introduce timing gradually until you hit the real per-question pace. Keep an error log — every mistake gets a one-line “why” so the same trap never catches you twice.</p>
+      </div>
+    </div>
+    <div class="phase">
+      <div class="dot">3</div>
+      <div>
+        <span class="wk">Weeks 6–8 · Full mocks</span>
+        <h4>Live under exam conditions</h4>
+        <p>Two to three <b>full, timed mocks</b> a week, in one sitting, no phone, using the on-screen calculator and noteboard. Review every mock in full. Save the <b>official UCAT practice tests</b> for last — they’re the truest calibration of where you’ll land.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="callout warn">
+    <h3>The one habit that separates top scorers</h3>
+    <p>They review more than they grind. Doing 40 questions and understanding all 40 mistakes beats doing 200 and glancing at the score. Volume without review just rehearses your errors.</p>
+  </div>
+</div></section>
+
+<!-- ============ RESOURCES ============ -->
+<section id="resources"><div class="wrap">
+  <div class="sec-head"><span class="num">09</span></div>
+  <h2>Resources, ranked by usefulness</h2>
+  <p class="sec-intro">Start with the free official material for accuracy, add a question bank for volume, and use timed mocks to build stamina. Quality and realism matter far more than sheer quantity.</p>
+
+  <div class="reslist">
+    <div class="res free"><span class="k">Free · Official</span><div class="b"><b>UCAT Consortium practice materials (ucat.ac.uk)</b><br><span>The most representative questions and the two official mock exams. The single best calibration tool — do the full mocks near the end of your prep.</span></div></div>
+    <div class="res free"><span class="k">Free · This app</span><div class="b"><b>Your UCAT Prep question bank</b><br><span>A difficulty-calibrated, duplicate-free bank with per-user progress tracking and flashcards — use it for daily drilling and to see accuracy by subtest.</span></div></div>
+    <div class="res"><span class="k">Paid · Volume</span><div class="b"><b>Commercial question banks &amp; mock platforms</b><br><span>Providers such as Medify, MedEntry, Pastest and others offer thousands of questions and timed mocks. Useful for stamina — just don’t mistake volume for progress.</span></div></div>
+    <div class="res"><span class="k">Free · Skills</span><div class="b"><b>Mental-maths &amp; speed-reading drills</b><br><span>Times-tables, percentage and fraction fluency for QR; timed skim-reading for VR. Ten focused minutes a day compounds fast.</span></div></div>
+  </div>
+  <p class="fine">There are no “real past papers” — the UCAT is a non-disclosed exam, so no genuine past questions exist anywhere. Anything advertised as leaked past papers is neither official nor reliable; the official practice tests are as close as it gets.</p>
+</div></section>
+
+<!-- ============ EXAM DAY ============ -->
+<section id="examday"><div class="wrap">
+  <div class="sec-head"><span class="num">10</span></div>
+  <h2>Exam day</h2>
+  <p class="sec-intro">By now the technique is built — the job is to protect it from nerves and logistics. Nothing on the day should be a first-time experience.</p>
+  <div class="colw" style="--h:var(--teal)">
+    <div class="block"><h4>Before you go</h4>
+      <ul>
+        <li>Sleep properly the night before — cramming past midnight costs more than it adds.</li>
+        <li>Bring the <b>correct photo ID</b>; check the test-centre rules the day before.</li>
+        <li>Eat something steady and hydrate; arrive early to settle your nerves.</li>
+      </ul>
+    </div>
+    <div class="block"><h4>During the test</h4>
+      <ul>
+        <li>Work one subtest at a time. A rough section is not the exam — reset and move on.</li>
+        <li>Trust your pace and your “flag &amp; move” reflex; don’t renegotiate strategy mid-exam.</li>
+        <li>Always spend the final seconds of each subtest filling every blank.</li>
+      </ul>
+    </div>
+    <div class="block"><h4>Keeping nerves in check</h4>
+      <ul>
+        <li>Slow breathing between subtests resets a racing mind faster than re-reading a question.</li>
+        <li>You’ve rehearsed this exact format — the day is just another mock with higher stakes.</li>
+      </ul>
+    </div>
+    <div class="block"><h4>Perspective</h4>
+      <ul>
+        <li>The UCAT is one part of your application, alongside grades, personal statement and interview.</li>
+        <li>Different schools weight it differently — a strong score opens doors, but it isn’t the whole decision.</li>
+      </ul>
+    </div>
+  </div>
+</div></section>
+
+<!-- ============ MINDSET ============ -->
+<section id="mindset"><div class="wrap">
+  <div class="sec-head"><span class="num">11</span></div>
+  <h2>The eleven commandments</h2>
+  <p class="sec-intro">Everything above, distilled. If you internalise nothing else, internalise these.</p>
+  <ul class="cmd">
+    <li><b>Never leave a blank.</b> No negative marking means a guess is free upside.</li>
+    <li><b>Flag and move</b> the instant a question runs long. Protect the easy marks.</li>
+    <li><b>Answer only what’s asked</b> — in VR and QR the data is full of decoys.</li>
+    <li><b>“Can’t Tell” is a real answer.</b> If the passage doesn’t say it, don’t infer it.</li>
+    <li><b>Must, not might.</b> DM rewards necessity, never mere possibility.</li>
+    <li><b>Divide, don’t add back</b> for reverse percentages.</li>
+    <li><b>Patient safety first</b> in every SJT scenario; never do nothing.</li>
+    <li><b>Review beats volume.</b> Understand every mistake before doing more.</li>
+    <li><b>Live in full timed mocks</b> for the final stretch.</li>
+    <li><b>Save the official tests</b> for your truest calibration near the end.</li>
+    <li><b>It’s one part of the application.</b> Prepare hard, then keep it in perspective.</li>
+  </ul>
+</div></section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div>
+      <div class="mark">The UCAT <b>Playbook</b></div>
+      <p>Built for UCAT Prep. Figures reflect the 2025 / 2026 test cycle (Abstract Reasoning removed; scored out of 2700). Always confirm the current year’s format and your universities’ requirements at <a href="https://www.ucat.ac.uk">ucat.ac.uk</a>.</p>
+    </div>
+    <p style="align-self:flex-end">Data: UCAT Consortium test-format &amp; statistics, 2025.</p>
+  </div>
+</footer>
+
+<script>
+(function(){
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* reading progress */
+  var bar = document.getElementById('progress');
+  function onScroll(){
+    var h = document.documentElement;
+    var max = h.scrollHeight - h.clientHeight;
+    bar.style.width = (max>0 ? (h.scrollTop/max*100) : 0) + '%';
+  }
+  document.addEventListener('scroll', onScroll, {passive:true});
+  onScroll();
+
+  /* active nav via IntersectionObserver */
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav.jump a'));
+  var map = {};
+  links.forEach(function(a){ map[a.getAttribute('href').slice(1)] = a; });
+  var secs = links.map(function(a){ return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);
+  if('IntersectionObserver' in window){
+    var io = new IntersectionObserver(function(entries){
+      entries.forEach(function(e){
+        if(e.isIntersecting){
+          links.forEach(function(l){l.classList.remove('active');});
+          var act = map[e.target.id];
+          if(act){ act.classList.add('active'); act.scrollIntoView({block:'nearest',inline:'center'}); }
+        }
+      });
+    }, {rootMargin:'-45% 0px -50% 0px', threshold:0});
+    secs.forEach(function(s){ io.observe(s); });
+  }
+
+  /* score checker */
+  var vr=document.getElementById('vrS'),dm=document.getElementById('dmS'),qr=document.getElementById('qrS');
+  var vrO=document.getElementById('vrO'),dmO=document.getElementById('dmO'),qrO=document.getElementById('qrO');
+  var totalOut=document.getElementById('totalOut'),tierOut=document.getElementById('tierOut'),descOut=document.getElementById('descOut'),mk=document.getElementById('mk');
+  // percentile anchors from 2025 data (score -> percentile)
+  var anchors=[[1580,10],[1680,20],[1760,30],[1820,40],[1880,50],[1950,60],[2020,70],[2100,80],[2200,90],[2340,97]];
+  function pct(t){
+    if(t<=anchors[0][0]) return Math.max(1, Math.round(anchors[0][1]*t/anchors[0][0]));
+    for(var i=0;i<anchors.length-1;i++){
+      if(t<=anchors[i+1][0]){
+        var a=anchors[i],b=anchors[i+1];
+        return Math.round(a[1]+(b[1]-a[1])*(t-a[0])/(b[0]-a[0]));
+      }
+    }
+    return 99;
+  }
+  function tier(t){
+    if(t>=2300) return ['Outstanding','Top few percent — competitive for the most selective courses.'];
+    if(t>=2100) return ['Excellent','Top 20% of the cohort — a strong, widely competitive score.'];
+    if(t>=1950) return ['Above average','Above the median. Solid, and competitive at many schools.'];
+    if(t>=1760) return ['Around average','Middle of the pack — room to push into the upper deciles.'];
+    return ['Building','Below this year’s average — a clear focus area to train up.'];
+  }
+  function update(){
+    var v=+vr.value,d=+dm.value,q=+qr.value,t=v+d+q;
+    vrO.textContent=v;dmO.textContent=d;qrO.textContent=q;
+    totalOut.textContent=t;
+    var ti=tier(t);
+    tierOut.textContent=ti[0];
+    var p=pct(t);
+    descOut.textContent=ti[1]+' ~'+p+'th percentile.';
+    // marker position across 900 (min 900) to 2700 range, clamped visually to 1500-2400 useful band
+    var lo=1500, hi=2400;
+    var pos=Math.max(0,Math.min(100,(t-lo)/(hi-lo)*100));
+    mk.style.left='calc('+pos+'% - 1.5px)';
+  }
+  [vr,dm,qr].forEach(function(s){ s.addEventListener('input',update); });
+  update();
+
+  /* hero ECG canvas */
+  var cv=document.getElementById('ecg');
+  if(cv){
+    var ctx=cv.getContext('2d'), W,H,dpr;
+    function size(){
+      dpr=Math.min(window.devicePixelRatio||1,2);
+      W=cv.clientWidth; H=cv.clientHeight;
+      cv.width=W*dpr; cv.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
+    }
+    size();
+    var css=getComputedStyle(document.documentElement);
+    var stroke=css.getPropertyValue('--teal').trim()||'#0C6B58';
+    // one PQRST beat as normalized offsets (x fraction of segment, y offset in px from baseline)
+    function beat(x){ // x in 0..1 within a beat, returns y offset (up = negative)
+      function g(c,w,a){var d=(x-c)/w;return a*Math.exp(-d*d);}
+      var y=0;
+      y+= g(0.18,0.02,-6);   // P
+      y+= g(0.30,0.010, 8);  // Q
+      y+= g(0.33,0.012,-42); // R
+      y+= g(0.37,0.012, 16); // S
+      y+= g(0.55,0.035,-12); // T
+      return y;
+    }
+    var beatW=170; // px per beat
+    var offset=0;
+    function draw(){
+      ctx.clearRect(0,0,W,H);
+      var mid=H*0.62;
+      ctx.lineWidth=2; ctx.strokeStyle=stroke; ctx.globalAlpha=0.9;
+      ctx.beginPath();
+      for(var px=0;px<=W;px+=2){
+        var gx=(px+offset)/beatW;
+        var frac=gx-Math.floor(gx);
+        var y=mid+beat(frac);
+        if(px===0) ctx.moveTo(px,y); else ctx.lineTo(px,y);
+      }
+      ctx.stroke();
+      ctx.globalAlpha=1;
+    }
+    function loop(){ offset+=0.9; if(offset>1e7) offset=0; draw(); raf=requestAnimationFrame(loop); }
+    var raf;
+    if(reduce){ draw(); } else { loop(); }
+    window.addEventListener('resize', function(){ size(); if(reduce) draw(); });
+  }
+})();
+</script>

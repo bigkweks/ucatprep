@@ -342,7 +342,7 @@ with st.sidebar:
     st.markdown("---")
     page = st.radio(
         "Navigate",
-        ["📊 Dashboard", "📝 Practice Questions", "⏱️ Mock Exam", "🃏 Flashcards",
+        ["📊 Dashboard", "🧭 UCAT Guide", "📝 Practice Questions", "⏱️ Mock Exam", "🃏 Flashcards",
          "🗓️ Study Scheduler", "📚 Strategy & Skills", "🤖 AI Tutor", "⚙️ Manage"],
         label_visibility="collapsed",
     )
@@ -698,6 +698,24 @@ def page_scheduler():
             db.delete_study_task(uid, t["id"])
             _invalidate_tasks_cache()
             st.rerun()
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# UCAT GUIDE (static playbook)
+# ════════════════════════════════════════════════════════════════════════════
+_GUIDE_PATH = os.path.join(os.path.dirname(__file__), "assets", "ucat_guide.html")
+
+
+@st.cache_data(show_spinner=False)
+def _load_guide_html() -> str:
+    with open(_GUIDE_PATH, encoding="utf-8") as f:
+        return f.read()
+
+
+def page_guide():
+    st.title("🧭 The UCAT Playbook")
+    st.caption("A complete strategy guide: format, scoring, per-subtest tactics, a study plan, and an interactive score checker.")
+    components.html(_load_guide_html(), height=900, scrolling=True)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1138,6 +1156,7 @@ def page_mock():
 # ── Router ────────────────────────────────────────────────────────────────────
 PAGES = {
     "📊 Dashboard": page_dashboard,
+    "🧭 UCAT Guide": page_guide,
     "📝 Practice Questions": page_practice,
     "⏱️ Mock Exam": page_mock,
     "🃏 Flashcards": page_flashcards,
