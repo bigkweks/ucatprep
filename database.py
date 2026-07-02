@@ -749,6 +749,24 @@ def delete_question(qid):
         _close(conn)
 
 
+def get_last_seen_at(user_id):
+    """Map of {question_id: most-recent attempt timestamp} for this user, used
+    to prioritise unseen and least-recently-seen questions in new quizzes over
+    ones already answered, so practice naturally cycles through the bank
+    instead of repeating at random."""
+    ph = _ph()
+    conn = get_conn()
+    try:
+        rows = _q(conn, f"""
+            SELECT question_id, MAX(created_at) AS last_seen
+            FROM attempts WHERE user_id = {ph}
+            GROUP BY question_id
+        """, (user_id,))
+        return {r["question_id"]: r["last_seen"] for r in rows}
+    finally:
+        _close(conn)
+
+
 def record_attempt(user_id, question_id, subject_id, chosen, is_correct, seconds=0):
     conn = get_conn()
     try:

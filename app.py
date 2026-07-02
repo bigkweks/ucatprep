@@ -117,6 +117,11 @@ def cached_flashcards(uid, subject_id=None, due_only=False):
     return db.get_flashcards(uid, subject_id=subject_id, due_only=due_only)
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def cached_last_seen(uid):
+    return db.get_last_seen_at(uid)
+
+
 def _invalidate_content_cache():
     """Call after any write to the shared questions/topics/flashcards content bank."""
     cached_questions.clear()
@@ -134,6 +139,7 @@ def _invalidate_stats_cache():
     cached_leaderboard_questions.clear()
     cached_leaderboard_pace.clear()
     cached_leaderboard_mock_scores.clear()
+    cached_last_seen.clear()
 
 
 def _invalidate_tasks_cache():
@@ -660,22 +666,37 @@ def _passage_units(pool):
     return units
 
 
-def _mixed_unit_order(pool):
+def _unit_priority(unit, seen_map):
+    """Sort key for a quiz unit: unseen questions first (in random order among
+    themselves), then seen ones ordered least- before most-recently-seen. Lets
+    a student cycle through the whole bank before anything repeats, instead of
+    every quiz sampling purely at random with no memory of what was already
+    answered."""
+    times = [seen_map.get(q["id"]) for q in unit]
+    if all(t is None for t in times):
+        return (0, random.random())
+    return (1, max(t for t in times if t is not None))
+
+
+def _mixed_unit_order(pool, seen_map=None):
     """Order a pool's units (see _passage_units) for a quiz, guaranteeing an even
     mix across subtests instead of a flat shuffle. Decision Making's standalone
     questions form far more, smaller units than VR/QR/SJT's passage sets — a
     plain shuffle can fill an entire short 'All subtests' quiz with DM alone
     before ever reaching a passage, purely because there are more small units to
-    draw from. Round-robining across subtests (each subtest's own units
-    independently shuffled, one drawn from each in a freshly-shuffled rotation
-    every pass) means every represented subtest appears before any one repeats,
-    so a short mixed quiz reliably samples the passage-based format too."""
+    draw from. Round-robining across subtests (each subtest's own units ordered
+    by _unit_priority, one drawn from each in a freshly-shuffled rotation every
+    pass) means every represented subtest appears before any one repeats, and
+    within each subtest unseen/long-unseen questions come up before recent
+    repeats — so a short mixed quiz reliably samples new material rather than
+    randomly re-serving whatever you just answered."""
+    seen_map = seen_map or {}
     units = _passage_units(pool)
     by_subject: dict = {}
     for u in units:
         by_subject.setdefault(u[0]["subject_id"], []).append(u)
     for lst in by_subject.values():
-        random.shuffle(lst)
+        lst.sort(key=lambda u: _unit_priority(u, seen_map))
     remaining = list(by_subject.keys())
     ordered = []
     while remaining:
@@ -786,13 +807,14 @@ def page_practice():
             n = st.number_input("Questions", 1, 50, 5, key="quiz_n")
         if st.button("▶️ Start quiz", type="primary"):
             pool = cached_questions(subject_id=sid, difficulty=difficulty)
-            # Keep passage sets intact and in order, and — when mixing subtests
-            # — round-robin across them so a short quiz reliably samples every
-            # subtest's format rather than being dominated by whichever one
-            # happens to have the most granular units. Then take units until
-            # reaching the requested count (a passage set may nudge the total
-            # slightly over rather than be cut in half).
-            units = _mixed_unit_order(pool)
+            # Keep passage sets intact and in order, round-robin across subtests
+            # when mixing so a short quiz reliably samples every subtest's
+            # format, and prioritise unseen / least-recently-seen questions so
+            # practice cycles through the bank instead of repeating at random.
+            # Then take units until reaching the requested count (a passage set
+            # may nudge the total slightly over rather than be cut in half).
+            seen_map = cached_last_seen(ss["user_id"])
+            units = _mixed_unit_order(pool, seen_map)
             quiz: list = []
             for u in units:
                 if len(quiz) >= int(n):
