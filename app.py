@@ -592,6 +592,40 @@ def page_dashboard():
 # ════════════════════════════════════════════════════════════════════════════
 # PRACTICE QUESTIONS
 # ════════════════════════════════════════════════════════════════════════════
+def _passage_units(pool):
+    """Group a question pool into units so passage-linked questions stay together
+    and in order — a long passage followed by its series of questions, as in real
+    UCAT VR. Standalone questions become single-item units. The caller shuffles
+    the units and flattens them, so passage sets are never split apart."""
+    groups: dict = {}
+    units: list = []
+    for q in pool:
+        pid = q.get("passage_id")
+        if pid:
+            groups.setdefault(pid, []).append(q)
+        else:
+            units.append([q])
+    for qs in groups.values():
+        qs.sort(key=lambda x: x["id"])
+        units.append(qs)
+    return units
+
+
+def _render_passage(q, quiz, idx):
+    """Show the shared passage above a passage-linked question, and keep it
+    visible for every question in the set — exactly as the real exam does."""
+    if not q.get("passage_body"):
+        return
+    same = [i for i, qq in enumerate(quiz) if qq.get("passage_id") == q.get("passage_id")]
+    with st.container(border=True):
+        if q.get("passage_title"):
+            st.markdown(f"**{q['passage_title']}**")
+        st.markdown(q["passage_body"])
+    if len(same) > 1 and idx in same:
+        st.caption(f"Passage question {same.index(idx) + 1} of {len(same)} — "
+                   "the passage stays visible for every question in the set.")
+
+
 def page_practice():
     st.title("📝 Practice Questions")
     ss = st.session_state
@@ -606,12 +640,20 @@ def page_practice():
             n = st.number_input("Questions", 1, 50, 5, key="quiz_n")
         if st.button("▶️ Start quiz", type="primary"):
             pool = cached_questions(subject_id=sid, difficulty=difficulty)
-            random.shuffle(pool)
-            pool = pool[:int(n)]
-            if not pool:
+            # Keep passage sets intact and in order; shuffle whole units, then
+            # take units until we reach the requested count (a passage set may
+            # nudge the total slightly over rather than be cut in half).
+            units = _passage_units(pool)
+            random.shuffle(units)
+            quiz: list = []
+            for u in units:
+                if len(quiz) >= int(n):
+                    break
+                quiz.extend(u)
+            if not quiz:
                 st.warning("No questions match those filters yet. Add some in ⚙️ Manage.")
             else:
-                ss["quiz"] = pool
+                ss["quiz"] = quiz
                 ss["quiz_idx"] = 0
                 ss["quiz_answered"] = {}
                 ss["quiz_correct"] = 0
@@ -652,6 +694,7 @@ def page_practice():
     st.progress((idx) / len(quiz), text=f"Question {idx + 1} of {len(quiz)}")
     if sub:
         st.markdown(pill(sub["name"], sub["color"]) + f"  &nbsp; <span style='color:#888'>{q['difficulty']}</span>", unsafe_allow_html=True)
+    _render_passage(q, quiz, idx)
     st.markdown(f"### {q['stem']}")
 
     options = {"A": q["option_a"], "B": q["option_b"], "C": q["option_c"], "D": q["option_d"]}
@@ -1601,9 +1644,12 @@ def _build_mock(subtest_ids):
     for s in SUBJECTS:
         if subtest_ids and s["id"] not in subtest_ids:
             continue
-        qs = cached_questions(subject_id=s["id"])
-        random.shuffle(qs)
-        questions.extend(qs)
+        # Shuffle whole passage sets rather than loose questions so a passage's
+        # follow-ups stay together and in order, as in the real exam.
+        units = _passage_units(cached_questions(subject_id=s["id"]))
+        random.shuffle(units)
+        for u in units:
+            questions.extend(u)
     budget = sum(seconds_per_question(SUB_BY_ID[q["subject_id"]]["code"]) for q in questions)
     return questions, int(budget)
 
@@ -1783,6 +1829,7 @@ def page_mock():
     if sub:
         st.markdown(pill(sub["name"], sub["color"]) + f"  &nbsp; <span style='color:#888'>{q['difficulty']}</span>",
                     unsafe_allow_html=True)
+    _render_passage(q, quiz, idx)
     st.markdown(f"### {q['stem']}")
 
     options = {"A": q["option_a"], "B": q["option_b"], "C": q["option_c"], "D": q["option_d"]}

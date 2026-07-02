@@ -183,10 +183,19 @@ CREATE TABLE IF NOT EXISTS topics (
     content    TEXT,
     created_at TEXT
 );
+CREATE TABLE IF NOT EXISTS passages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject_id  INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+    topic_id    INTEGER REFERENCES topics(id) ON DELETE SET NULL,
+    title       TEXT NOT NULL,
+    body        TEXT NOT NULL,
+    created_at  TEXT
+);
 CREATE TABLE IF NOT EXISTS questions (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     subject_id  INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
     topic_id    INTEGER REFERENCES topics(id) ON DELETE SET NULL,
+    passage_id  INTEGER REFERENCES passages(id) ON DELETE CASCADE,
     stem        TEXT NOT NULL,
     option_a    TEXT NOT NULL,
     option_b    TEXT NOT NULL,
@@ -296,10 +305,19 @@ _PG_TABLES = [
         content    TEXT,
         created_at TEXT
     )""",
+    """CREATE TABLE IF NOT EXISTS passages (
+        id          SERIAL PRIMARY KEY,
+        subject_id  INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+        topic_id    INTEGER REFERENCES topics(id) ON DELETE SET NULL,
+        title       TEXT NOT NULL,
+        body        TEXT NOT NULL,
+        created_at  TEXT
+    )""",
     """CREATE TABLE IF NOT EXISTS questions (
         id          SERIAL PRIMARY KEY,
         subject_id  INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
         topic_id    INTEGER REFERENCES topics(id) ON DELETE SET NULL,
+        passage_id  INTEGER REFERENCES passages(id) ON DELETE CASCADE,
         stem        TEXT NOT NULL,
         option_a    TEXT NOT NULL,
         option_b    TEXT NOT NULL,
@@ -414,6 +432,24 @@ def _migrate_user_ids(conn):
     _commit(conn)
 
 
+def _migrate_passage_id(conn):
+    """Add questions.passage_id to databases created before passage-based
+    content (a long shared passage → a series of linked questions, as in real
+    UCAT VR) existed, so existing deployments gain the column without losing
+    rows. The passages table itself is created by the schema's CREATE TABLE IF
+    NOT EXISTS, so only the new column on the pre-existing questions table needs
+    an explicit ALTER here."""
+    if _column_exists(conn, "questions", "passage_id"):
+        return
+    if _setup():
+        with conn.cursor() as cur:
+            cur.execute("ALTER TABLE questions ADD COLUMN passage_id INTEGER "
+                        "REFERENCES passages(id) ON DELETE CASCADE")
+    else:
+        conn.execute("ALTER TABLE questions ADD COLUMN passage_id INTEGER REFERENCES passages(id)")
+    _commit(conn)
+
+
 def init_db():
     """Create tables, migrate older schemas, seed starter content on first
     run, and backfill any newer seed content into an already-populated
@@ -432,6 +468,7 @@ def init_db():
             conn.executescript(_SQLITE_SCHEMA)
         _commit(conn)
         _migrate_user_ids(conn)
+        _migrate_passage_id(conn)
     finally:
         _close(conn)
     seed_content()
@@ -574,9 +611,11 @@ def delete_topic(topic_id):
 
 def get_questions(subject_id=None, topic_id=None, difficulty=None, limit=None):
     ph = _ph()
-    sql = """SELECT q.*, s.name AS subject_name, s.color, t.name AS topic_name
+    sql = """SELECT q.*, s.name AS subject_name, s.color, t.name AS topic_name,
+                    p.title AS passage_title, p.body AS passage_body
              FROM questions q JOIN subjects s ON q.subject_id = s.id
-             LEFT JOIN topics t ON q.topic_id = t.id WHERE 1=1"""
+             LEFT JOIN topics t ON q.topic_id = t.id
+             LEFT JOIN passages p ON q.passage_id = p.id WHERE 1=1"""
     params: list = []
     if subject_id:
         sql += f" AND q.subject_id = {ph}"
@@ -2156,6 +2195,318 @@ _QUESTIONS = [
      "Requesting appropriate supervision matches the level of the student's training and experience, balancing patient safety with legitimate learning — declining entirely would be an overreaction given some relevant training exists.", "Hard"),
 ]
 
+# ── Passage sets: a shared stimulus + a series of linked questions ────────────
+# This mirrors real UCAT format — especially Verbal Reasoning, where one long
+# passage is followed by four questions, and Quantitative Reasoning, where a
+# table or scenario feeds several calculations.
+# Shape: (subject_code, topic_name, title, body, [
+#            (stem, A, B, C, D, correct, explanation, difficulty), ... ])
+_PASSAGE_SETS = [
+    ("VR", "True / False / Can't Tell",
+     "The Pharos of Alexandria",
+     "The Pharos of Alexandria, completed around 280 BCE on the orders of Ptolemy II, was for many "
+     "centuries the tallest man-made structure in the world after the Great Pyramid of Giza. "
+     "Contemporary accounts describe a three-tiered tower: a square base, an octagonal middle section, "
+     "and a cylindrical top from which a fire burned at night to guide ships into the busy harbour. "
+     "Estimates of its height vary widely among ancient writers, ranging from roughly 100 to 140 metres, "
+     "and no consensus has been reached by modern scholars. Later legends — unsupported by any "
+     "contemporary source — claimed that a great mirror at its summit could focus the sun's rays to burn "
+     "enemy vessels far out at sea. A series of earthquakes between the tenth and fourteenth centuries "
+     "progressively damaged the structure, and by 1480 its remaining stones had been used to build a "
+     "fortress on the same site. In 1994, archaeologists diving in the harbour recovered hundreds of "
+     "large masonry blocks and statue fragments believed to have fallen from the lighthouse, though "
+     "exactly which pieces belonged to the tower itself remains disputed.",
+     [
+         ("Statement: The exact original height of the Pharos is known with certainty. "
+          "Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "Partly true", "B",
+          "The passage says estimates range from about 100 to 140 metres with 'no consensus' among modern "
+          "scholars, so the exact height is not known — the statement is contradicted, making it False.", "Medium"),
+         ("Statement: The mirror said to sit at the summit could burn enemy ships far out at sea. "
+          "Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "Partly true", "C",
+          "The passage reports this only as a later legend 'unsupported by any contemporary source'. It "
+          "neither confirms nor denies the claim, so there isn't enough information to judge it — Can't tell. "
+          "Note the trap: 'unsupported' is not the same as proven false.", "Hard"),
+         ("Which statement is best supported by the passage on the Pharos of Alexandria?",
+          "Stone from the ruined lighthouse was reused to build a fortress on the same site",
+          "The Pharos was the tallest structure ever built by humans",
+          "The 1994 dive proved that every recovered block came from the lighthouse",
+          "A single earthquake destroyed the Pharos", "A",
+          "The text states its remaining stones 'had been used to build a fortress on the same site'. B "
+          "overreaches (only tallest after the Great Pyramid, and only for centuries); C is disputed; and "
+          "the damage came from 'a series of earthquakes', progressively — not one event.", "Medium"),
+         ("Statement: The Pharos was completed on the orders of Ptolemy II. "
+          "Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "Partly true", "A",
+          "This is stated directly: 'completed around 280 BCE on the orders of Ptolemy II'.", "Easy"),
+     ]),
+
+    ("VR", "Inference & Author Tone",
+     "Birdsong Dialects",
+     "Many songbird species learn their songs rather than inheriting them fully formed, and this learning "
+     "produces regional variations that ornithologists compare to human dialects. A young bird typically "
+     "memorises the songs it hears during a sensitive period in its first months of life, then refines its "
+     "own output to match that template. Because the template is local, birds in neighbouring valleys can "
+     "develop recognisably different songs, and these differences can persist for generations. Researchers "
+     "studying white-crowned sparrows in California documented dialect boundaries so sharp that birds a few "
+     "kilometres apart sang distinctly different versions. The function of these dialects is debated. One "
+     "hypothesis holds that females prefer males singing the local dialect, which would reinforce "
+     "boundaries over time; another proposes that dialects are simply an incidental by-product of song "
+     "learning with no adaptive purpose. Experiments in which young sparrows were played recordings of "
+     "foreign dialects showed that the birds could learn them, indicating that the dialect a bird sings "
+     "depends on what it hears, not on where its parents came from. Notably, a small number of birds sing "
+     "'bilingual' songs at dialect boundaries, switching between versions depending on which neighbours "
+     "they are addressing.",
+     [
+         ("Statement: The dialect a white-crowned sparrow sings is fixed by the region its parents came "
+          "from. Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "Partly true", "B",
+          "Playback experiments showed young birds learn whatever dialect they hear, so the dialect depends "
+          "on what a bird hears, 'not on where its parents came from' — the statement is contradicted, "
+          "making it False.", "Medium"),
+         ("Which statement about birdsong dialects is best supported by the passage?",
+          "Song dialects can persist across several generations",
+          "All songbird species inherit their songs fully formed at birth",
+          "Females have been proven to prefer males singing the local dialect",
+          "Bilingual songs are typical across the whole sparrow population", "A",
+          "The text says the differences 'can persist for generations'. B contradicts the opening ('many "
+          "... learn'); C is only one debated, unproven hypothesis; and bilingual birds are 'a small "
+          "number ... at dialect boundaries', not typical.", "Medium"),
+         ("Statement: Scientists agree on the purpose that song dialects serve. "
+          "Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "Partly true", "B",
+          "The passage says 'the function of these dialects is debated' and sets out two competing "
+          "hypotheses, so there is no agreement — the statement is contradicted, making it False.", "Medium"),
+         ("According to the passage, the 'bilingual' birds:",
+          "switch song versions according to which neighbours they are addressing",
+          "sing only at the centre of a dialect region",
+          "are unable to learn either dialect properly",
+          "prove that dialects serve no purpose", "A",
+          "The passage says they occur at boundaries and switch versions 'depending on which neighbours "
+          "they are addressing'. The other options are unsupported or contradicted.", "Hard"),
+     ]),
+
+    ("VR", "Reading for the Main Idea",
+     "The Potato Comes to Europe",
+     "The potato, native to the Andes, reached Europe in the second half of the sixteenth century, most "
+     "likely carried back by Spanish ships. Its adoption was slow and uneven. In several regions the plant "
+     "was regarded with suspicion: it belonged to the nightshade family, some of whose relatives are "
+     "poisonous, and because it was not mentioned in the Bible a few communities distrusted it on "
+     "principle. Botanists initially grew it as a curiosity in ornamental gardens rather than as a food "
+     "crop. Attitudes shifted over the following two centuries. The potato yielded more calories per acre "
+     "than the grain crops it competed with, tolerated poor soils, and could be left in the ground until "
+     "needed, which made it harder for passing armies to seize or destroy. Governments came to see these "
+     "traits as valuable. In France, the agronomist Antoine Parmentier promoted the crop energetically "
+     "after eating potatoes as a prisoner of war, staging banquets and, according to a popular story, "
+     "posting guards around a potato field by day so that peasants would assume the crop was valuable and "
+     "steal it by night. By the nineteenth century the potato had become a staple across much of northern "
+     "Europe. This dependence carried a risk that became tragically clear when a fungal blight destroyed "
+     "successive harvests in the 1840s.",
+     [
+         ("Which of the following best expresses the main idea of the passage?",
+          "The potato's rise from a distrusted curiosity to a European staple was gradual and driven by "
+          "its practical advantages",
+          "The potato was accepted enthusiastically as soon as it arrived in Europe",
+          "Antoine Parmentier single-handedly made the potato popular across Europe",
+          "The potato was always considered poisonous by European botanists", "A",
+          "The passage traces a slow, uneven adoption that grew as governments recognised the crop's yield, "
+          "hardiness and military usefulness. B contradicts 'slow and uneven'; C overstates one figure's "
+          "role; and botanists grew it as a curiosity, not as something always deemed poisonous.", "Medium"),
+         ("Statement: Distrust of the potato was partly because it was not mentioned in the Bible. "
+          "Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "Partly true", "A",
+          "This reason is stated directly in the passage.", "Easy"),
+         ("Statement: The potato produced fewer calories per acre than the competing grain crops. "
+          "Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "Partly true", "B",
+          "The passage says it 'yielded more calories per acre than the grain crops it competed with' — the "
+          "statement is contradicted, making it False.", "Medium"),
+         ("Statement: Parmentier really did post guards around his potato field to make the crop seem "
+          "valuable. Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "Partly true", "C",
+          "The passage attributes the guarding to 'a popular story' and does not vouch for whether it "
+          "actually happened, so there isn't enough information to treat it as fact — Can't tell.", "Hard"),
+     ]),
+
+    ("VR", "True / False / Can't Tell",
+     "The Standardisation of Time",
+     "Before the nineteenth century, towns kept their own local time, set by the position of the sun, so "
+     "that clocks in one city might differ by several minutes from those in a city to its east or west. "
+     "For most purposes this caused no difficulty, because travel was slow. The spread of the railway "
+     "changed matters. Trains ran to timetables, and a timetable is useless if every station measures time "
+     "differently; a difference of a few minutes could mean a missed connection or, worse, two trains on "
+     "the same track. British railway companies therefore adopted a single standard — the time kept at the "
+     "Greenwich observatory — and by 1847 most had synchronised their clocks to it, sending the signal "
+     "along the telegraph lines that ran beside the tracks. Some towns resisted, keeping a separate "
+     "'local' time on a second minute hand for years, and it was not until 1880 that a single legal time "
+     "for the whole of Great Britain was fixed by statute. The principle spread internationally later in "
+     "the century, when delegates agreed to divide the world into standard time zones measured from "
+     "Greenwich. The convenience of the railways, rather than any scientific argument about the nature of "
+     "time, had driven the change.",
+     [
+         ("Statement: Before the nineteenth century, all British towns kept exactly the same time. "
+          "Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "Partly true", "B",
+          "Towns kept their own local time, differing by several minutes — the statement is contradicted, "
+          "making it False.", "Medium"),
+         ("Statement: A single legal time for the whole of Great Britain was fixed by statute before 1850. "
+          "Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "Partly true", "B",
+          "The railways synchronised to Greenwich by 1847, but the statute fixing a single legal time came "
+          "in 1880 — so the statement is contradicted, making it False.", "Hard"),
+         ("Which statement is best supported by the passage on the standardisation of time?",
+          "The railways adopted standard time mainly to avoid missed connections and collisions",
+          "Standard time was introduced because scientists proved local time was inaccurate",
+          "Every town abandoned its local time immediately once the railways synchronised",
+          "Time zones measured from Greenwich were agreed before the railways existed", "A",
+          "The passage ties the change to timetables and safety ('a missed connection or ... two trains on "
+          "the same track') and says convenience, 'rather than any scientific argument', drove it. B "
+          "contradicts that; some towns resisted 'for years'; and the zones came later.", "Medium"),
+         ("Statement: The standard time signal was distributed using telegraph lines running beside the "
+          "railway tracks. Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "Partly true", "A",
+          "This is stated directly: the signal was sent 'along the telegraph lines that ran beside the "
+          "tracks'.", "Easy"),
+     ]),
+
+    ("VR", "Inference & Author Tone",
+     "The London Coffee Houses",
+     "When coffee houses first appeared in seventeenth-century London, they were greeted with both "
+     "enthusiasm and alarm. For the price of a penny — the cost of a single cup — a man could enter, sit "
+     "for hours, read the newspapers provided, and join the conversation, which earned the establishments "
+     "the nickname 'penny universities'. Unlike taverns, coffee houses served a drink that sharpened "
+     "rather than dulled the mind, and they became centres for the exchange of news, gossip, and "
+     "commercial intelligence. Particular houses specialised: one near the docks became a place where "
+     "ship-owners and underwriters met to arrange marine insurance, and in time that gathering grew into a "
+     "famous insurance market. Others were frequented by poets, or by traders in stocks. The authorities "
+     "were uneasy. Because men of different ranks mixed freely and spoke openly about politics, the "
+     "government of the day suspected the houses of breeding sedition, and in 1675 a royal proclamation "
+     "attempted to close them. The outcry was such that the order was withdrawn within days. The writer "
+     "clearly regards the coffee houses as a lively and productive feature of the city, noting that "
+     "several modern institutions can trace their origins to a table in one of them.",
+     [
+         ("Which statement is best supported by the passage on the London coffee houses?",
+          "A famous insurance market grew out of meetings held in a coffee house",
+          "Coffee houses were quieter and more orderly than taverns",
+          "The 1675 proclamation succeeded in closing the coffee houses permanently",
+          "Only poets were allowed into the coffee houses", "A",
+          "The passage says a dockside house where ship-owners and underwriters met 'grew into a famous "
+          "insurance market'. B is not supported; the proclamation was 'withdrawn within days'; and men of "
+          "'different ranks mixed freely', so D is contradicted.", "Medium"),
+         ("How would you best describe the author's attitude towards the coffee houses?",
+          "Strongly hostile",
+          "Broadly approving — the author sees them as lively and productive",
+          "Indifferent and purely neutral",
+          "Nostalgic regret that they were dangerous", "B",
+          "The final sentence states the writer 'clearly regards the coffee houses as a lively and "
+          "productive feature of the city'.", "Medium"),
+         ("Statement: The government of the day welcomed the free political discussion in the coffee "
+          "houses. Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "Partly true", "B",
+          "The authorities were 'uneasy', suspected sedition, and even tried to close the houses — the "
+          "statement is contradicted, making it False.", "Medium"),
+         ("Statement: A single cup of coffee in these houses cost a penny. "
+          "Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "Partly true", "A",
+          "Stated directly: 'the price of a penny — the cost of a single cup'.", "Easy"),
+     ]),
+
+    ("VR", "Reading for the Main Idea",
+     "Sleep and Memory",
+     "It has long been observed that people remember newly learned material better after a night's sleep "
+     "than after an equal period awake, but only recently have researchers begun to explain why. During "
+     "sleep the brain does not simply rest; certain stages are marked by patterns of electrical activity "
+     "that appear to replay the neural sequences active during waking learning, as though rehearsing them. "
+     "This replay is thought to strengthen the connections that encode a memory and to transfer "
+     "information from short-term storage in the hippocampus to more durable storage in the cortex. "
+     "Different stages of sleep may serve different functions: slow-wave sleep, which dominates the early "
+     "part of the night, seems especially important for factual memories, while the rapid-eye-movement "
+     "stage, more common towards morning, has been linked to emotional and procedural learning. Studies in "
+     "which volunteers were deprived of sleep after learning a task, or woken selectively during "
+     "particular stages, generally show impaired recall compared with those allowed to sleep normally. "
+     "Researchers are careful to note, however, that most of this evidence is correlational, and that the "
+     "precise mechanisms remain uncertain. What is not disputed is that cutting sleep short to cram for an "
+     "examination is likely to be counter-productive.",
+     [
+         ("Which best captures the main idea of the passage?",
+          "Sleep has no measurable effect on memory",
+          "Sleep appears to help consolidate memories, though the exact mechanisms are still uncertain",
+          "Only rapid-eye-movement sleep matters for memory of any kind",
+          "Scientists have fully explained how sleep stores memories", "B",
+          "The passage describes evidence that sleep aids consolidation while stressing the mechanisms "
+          "'remain uncertain'. A contradicts the evidence; C ignores slow-wave sleep's role in factual "
+          "memory; and D overstates what is known.", "Medium"),
+         ("Statement: Slow-wave sleep is more common in the early part of the night. "
+          "Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "Partly true", "A",
+          "Stated directly: 'slow-wave sleep, which dominates the early part of the night'.", "Easy"),
+         ("Which statement about sleep and memory is best supported by the passage?",
+          "Rapid-eye-movement sleep is most important for factual memories",
+          "Sleeping less in order to cram is an effective exam strategy",
+          "The evidence that sleep consolidates memory is largely correlational",
+          "The hippocampus is where memories are stored permanently", "C",
+          "The passage says 'most of this evidence is correlational'. A swaps the stages (REM is linked to "
+          "emotional/procedural learning, slow-wave to factual); B is contradicted by the last sentence; "
+          "and the hippocampus is described as short-term storage, the cortex as durable.", "Hard"),
+         ("Which practical conclusion does the author draw?",
+          "Students should avoid sleep before an exam",
+          "Sleep is irrelevant to exam performance",
+          "Only emotional memories benefit from sleep",
+          "Cutting sleep short to cram for an exam is likely to backfire", "D",
+          "The closing sentence states that cutting sleep short to cram 'is likely to be "
+          "counter-productive'.", "Medium"),
+     ]),
+
+    ("QR", "Tables, Charts & Data",
+     "Physiotherapy Clinic Referrals",
+     "A physiotherapy clinic recorded the number of new patients referred each quarter during one year, "
+     "together with the average number of sessions each patient attended:\n\n"
+     "| Quarter | New patients | Avg. sessions per patient |\n"
+     "|---|---|---|\n"
+     "| Q1 | 120 | 6 |\n"
+     "| Q2 | 150 | 5 |\n"
+     "| Q3 | 90 | 8 |\n"
+     "| Q4 | 140 | 5 |\n\n"
+     "Each session is billed at a flat rate of £40. Use the table to answer the questions.",
+     [
+         ("How many new patients were referred to the clinic over the whole year?",
+          "480", "400", "500", "520", "C",
+          "120 + 150 + 90 + 140 = 500 patients.", "Easy"),
+         ("What was the total number of sessions delivered to Q3 patients?",
+          "720", "450", "640", "900", "A",
+          "90 patients × 8 sessions each = 720 sessions.", "Medium"),
+         ("What was the total billing revenue from Q1 patients, at £40 per session?",
+          "£4,800", "£28,800", "£19,200", "£30,000", "B",
+          "Q1 sessions = 120 × 6 = 720; revenue = 720 × £40 = £28,800.", "Medium"),
+         ("In which quarter did patients attend the greatest total number of sessions?",
+          "Q1", "Q2", "Q3", "Q4", "B",
+          "Totals: Q1 = 720, Q2 = 150 × 5 = 750, Q3 = 720, Q4 = 140 × 5 = 700. Q2 is highest at 750.", "Hard"),
+     ]),
+
+    ("QR", "Ratios & Proportion",
+     "Preparing an Intravenous Dose",
+     "A hospital pharmacy prepares an intravenous drug. The stock solution has a standard concentration of "
+     "5 milligrams of drug per millilitre (5 mg/mL). A patient weighing 70 kg is prescribed a single dose "
+     "of 2 mg of the drug per kilogram of body weight. The prepared dose is then diluted and infused at a "
+     "constant rate over 30 minutes.",
+     [
+         ("What total mass of the drug should the 70 kg patient receive?",
+          "140 mg", "350 mg", "70 mg", "35 mg", "A",
+          "70 kg × 2 mg/kg = 140 mg.", "Easy"),
+         ("What volume of the 5 mg/mL stock solution contains this dose?",
+          "14 mL", "28 mL", "700 mL", "2.8 mL", "B",
+          "140 mg ÷ 5 mg/mL = 28 mL.", "Medium"),
+         ("Infused over 30 minutes, what is the average rate of drug delivery in mg per minute?",
+          "2.3 mg/min", "9.3 mg/min", "4.7 mg/min", "70 mg/min", "C",
+          "140 mg ÷ 30 min ≈ 4.7 mg/min.", "Medium"),
+         ("A second patient weighs 85 kg and is prescribed the same 2 mg/kg dose. How much more drug does "
+          "this patient receive than the 70 kg patient?",
+          "15 mg", "30 mg", "45 mg", "170 mg", "B",
+          "(85 − 70) kg × 2 mg/kg = 30 mg more.", "Medium"),
+     ]),
+]
+
 # flashcards: (subject_code, topic_name, front, back)
 _FLASHCARDS = [
     ("VR", "True / False / Can't Tell", "When should you choose 'Can't Tell' in Verbal Reasoning?", "When the passage doesn't give enough information to judge the statement true or false. Never use outside knowledge."),
@@ -2189,6 +2540,41 @@ def _sync_subject_colors():
         _commit(conn)
     finally:
         _close(conn)
+
+
+def _upsert_passage_sets(conn, code_to_id, topic_key_to_id):
+    """Idempotently insert passage-based question sets — a shared stimulus plus
+    its linked follow-up questions, matching real UCAT (especially VR) format.
+    Safe to run on an already-seeded database: passages are matched by title and
+    questions by stem, so nothing is duplicated or overwritten. Returns the
+    number of questions added."""
+    now = datetime.now().isoformat()
+    existing_titles = {r["title"]: r["id"] for r in _q(conn, "SELECT id, title FROM passages")}
+    existing_stems = {r["stem"] for r in _q(conn, "SELECT stem FROM questions")}
+    added = 0
+    for code, tname, title, body, questions in _PASSAGE_SETS:
+        if code not in code_to_id:
+            continue
+        pid = existing_titles.get(title)
+        if pid is None:
+            pid = _run(conn, _n("""INSERT INTO passages (subject_id, topic_id, title, body, created_at)
+                       VALUES (:s,:t,:ti,:b,:ca)"""),
+                       {"s": code_to_id[code], "t": topic_key_to_id.get((code, tname)),
+                        "ti": title, "b": body, "ca": now})
+            existing_titles[title] = pid
+        for stem, a, b, c, d, correct, expl, diff in questions:
+            if stem in existing_stems:
+                continue
+            _run(conn, _n("""INSERT INTO questions (subject_id, topic_id, passage_id, stem, option_a,
+                       option_b, option_c, option_d, correct, explanation, difficulty, created_at)
+                       VALUES (:s,:t,:p,:stem,:a,:b,:c,:d,:cor,:e,:diff,:ca)"""),
+                 {"s": code_to_id[code], "t": topic_key_to_id.get((code, tname)), "p": pid,
+                  "stem": stem, "a": a, "b": b, "c": c, "d": d, "cor": correct,
+                  "e": expl, "diff": diff, "ca": now})
+            existing_stems.add(stem)
+            added += 1
+    _commit(conn)
+    return added
 
 
 def seed_content():
@@ -2230,6 +2616,8 @@ def seed_content():
                  {"s": code_to_id[code], "t": topic_key_to_id.get((code, tname)),
                   "f": front, "b": back, "due": today, "ca": now})
         _commit(conn)
+        # Passage-based question sets (long passage → linked questions)
+        _upsert_passage_sets(conn, code_to_id, topic_key_to_id)
     finally:
         _close(conn)
 
@@ -2295,6 +2683,10 @@ def backfill_content():
             existing_cards.add((front, back))
             added_f += 1
         _commit(conn)
+
+        # Passage-based question sets — idempotent, so an existing deployment
+        # picks up the long-passage → linked-question content without a reload.
+        added_q += _upsert_passage_sets(conn, code_to_id, topic_key_to_id)
     finally:
         _close(conn)
     return {"topics_added": added_t, "questions_added": added_q, "flashcards_added": added_f}
