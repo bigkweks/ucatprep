@@ -699,6 +699,22 @@
   var links = Array.prototype.slice.call(document.querySelectorAll('nav.jump a'));
   var map = {};
   links.forEach(function(a){ map[a.getAttribute('href').slice(1)] = a; });
+
+  /* Same-document scroll instead of following the href. When this page is
+     embedded via an srcdoc iframe (e.g. Streamlit's components.html), a
+     plain in-page "#id" link resolves against the *parent* page's URL, not
+     this document's — so the browser would navigate the iframe to a fresh,
+     unauthenticated copy of the host app instead of just scrolling here. */
+  links.forEach(function(a){
+    a.addEventListener('click', function(e){
+      var id = a.getAttribute('href').slice(1);
+      var target = document.getElementById(id);
+      if(target){
+        e.preventDefault();
+        target.scrollIntoView({behavior: reduce ? 'auto' : 'smooth', block: 'start'});
+      }
+    });
+  });
   var secs = links.map(function(a){ return document.getElementById(a.getAttribute('href').slice(1)); }).filter(Boolean);
   if('IntersectionObserver' in window){
     var io = new IntersectionObserver(function(entries){
