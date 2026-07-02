@@ -201,9 +201,11 @@ CREATE TABLE IF NOT EXISTS questions (
     option_b    TEXT NOT NULL,
     option_c    TEXT NOT NULL,
     option_d    TEXT NOT NULL,
-    correct     TEXT NOT NULL CHECK(correct IN ('A','B','C','D')),
+    option_e    TEXT,
+    correct     TEXT NOT NULL CHECK(correct IN ('A','B','C','D','E')),
     explanation TEXT,
     difficulty  TEXT DEFAULT 'Medium' CHECK(difficulty IN ('Easy','Medium','Hard')),
+    active      INTEGER DEFAULT 1,
     created_at  TEXT
 );
 CREATE TABLE IF NOT EXISTS attempts (
@@ -323,9 +325,11 @@ _PG_TABLES = [
         option_b    TEXT NOT NULL,
         option_c    TEXT NOT NULL,
         option_d    TEXT NOT NULL,
-        correct     TEXT NOT NULL CHECK(correct IN ('A','B','C','D')),
+        option_e    TEXT,
+        correct     TEXT NOT NULL CHECK(correct IN ('A','B','C','D','E')),
         explanation TEXT,
         difficulty  TEXT DEFAULT 'Medium' CHECK(difficulty IN ('Easy','Medium','Hard')),
+        active      INTEGER DEFAULT 1,
         created_at  TEXT
     )""",
     """CREATE TABLE IF NOT EXISTS attempts (
@@ -450,6 +454,36 @@ def _migrate_passage_id(conn):
     _commit(conn)
 
 
+def _migrate_question_options(conn):
+    """Bring the questions table up to the format the real UCAT needs:
+    a fifth option (option_e) for Quantitative Reasoning's five-choice items, an
+    `active` flag so legacy questions can be retired without deleting user
+    attempt history, and a widened `correct` CHECK that permits 'E'. Each step is
+    guarded so it is safe to re-run and safe on databases that predate it."""
+    # option_e (nullable — most subtests use fewer than five options)
+    if not _column_exists(conn, "questions", "option_e"):
+        if _setup():
+            with conn.cursor() as cur:
+                cur.execute("ALTER TABLE questions ADD COLUMN option_e TEXT")
+        else:
+            conn.execute("ALTER TABLE questions ADD COLUMN option_e TEXT")
+    # active flag (default on)
+    if not _column_exists(conn, "questions", "active"):
+        if _setup():
+            with conn.cursor() as cur:
+                cur.execute("ALTER TABLE questions ADD COLUMN active INTEGER DEFAULT 1")
+        else:
+            conn.execute("ALTER TABLE questions ADD COLUMN active INTEGER DEFAULT 1")
+    # widen the correct-answer CHECK to allow 'E' (Postgres only — SQLite CHECKs
+    # live in the CREATE TABLE and fresh SQLite databases already include 'E')
+    if _setup():
+        with conn.cursor() as cur:
+            cur.execute("ALTER TABLE questions DROP CONSTRAINT IF EXISTS questions_correct_check")
+            cur.execute("ALTER TABLE questions ADD CONSTRAINT questions_correct_check "
+                        "CHECK (correct IN ('A','B','C','D','E'))")
+    _commit(conn)
+
+
 def init_db():
     """Create tables, migrate older schemas, seed starter content on first
     run, and backfill any newer seed content into an already-populated
@@ -469,6 +503,7 @@ def init_db():
         _commit(conn)
         _migrate_user_ids(conn)
         _migrate_passage_id(conn)
+        _migrate_question_options(conn)
     finally:
         _close(conn)
     seed_content()
@@ -609,7 +644,7 @@ def delete_topic(topic_id):
 
 # ── Questions ──────────────────────────────────────────────────────────────────
 
-def get_questions(subject_id=None, topic_id=None, difficulty=None, limit=None):
+def get_questions(subject_id=None, topic_id=None, difficulty=None, limit=None, include_inactive=False):
     ph = _ph()
     sql = """SELECT q.*, s.name AS subject_name, s.color, t.name AS topic_name,
                     p.title AS passage_title, p.body AS passage_body
@@ -617,6 +652,8 @@ def get_questions(subject_id=None, topic_id=None, difficulty=None, limit=None):
              LEFT JOIN topics t ON q.topic_id = t.id
              LEFT JOIN passages p ON q.passage_id = p.id WHERE 1=1"""
     params: list = []
+    if not include_inactive:
+        sql += " AND (q.active = 1 OR q.active IS NULL)"
     if subject_id:
         sql += f" AND q.subject_id = {ph}"
         params.append(subject_id)
@@ -644,7 +681,8 @@ def get_question_counts_by_subject():
     try:
         return _q(conn, """
             SELECT s.id AS subject_id, s.name AS subject_name, s.color, COUNT(q.id) AS questions
-            FROM subjects s LEFT JOIN questions q ON q.subject_id = s.id
+            FROM subjects s LEFT JOIN questions q
+                ON q.subject_id = s.id AND (q.active = 1 OR q.active IS NULL)
             GROUP BY s.id, s.name, s.color
             ORDER BY s.sort_order, s.name
         """)
@@ -658,21 +696,23 @@ def upsert_question(data: dict):
     data.setdefault("topic_id", None)
     data.setdefault("explanation", "")
     data.setdefault("difficulty", "Medium")
+    data.setdefault("option_e", None)
     conn = get_conn()
     try:
         if data.get("id"):
             _run(conn, _n("""
                 UPDATE questions SET subject_id=:subject_id, topic_id=:topic_id, stem=:stem,
                     option_a=:option_a, option_b=:option_b, option_c=:option_c, option_d=:option_d,
-                    correct=:correct, explanation=:explanation, difficulty=:difficulty WHERE id=:id
+                    option_e=:option_e, correct=:correct, explanation=:explanation,
+                    difficulty=:difficulty WHERE id=:id
             """), data)
         else:
             data["created_at"] = now
             data["id"] = _run(conn, _n("""
                 INSERT INTO questions (subject_id, topic_id, stem, option_a, option_b, option_c,
-                    option_d, correct, explanation, difficulty, created_at)
+                    option_d, option_e, correct, explanation, difficulty, created_at)
                 VALUES (:subject_id, :topic_id, :stem, :option_a, :option_b, :option_c,
-                    :option_d, :correct, :explanation, :difficulty, :created_at)
+                    :option_d, :option_e, :correct, :explanation, :difficulty, :created_at)
             """), data)
         _commit(conn)
         return data["id"]
@@ -1186,7 +1226,7 @@ _QUESTIONS = [
      "Only B is directly stated. A contradicts the passage, while C and D are not supported by anything in the text.", "Easy"),
     ("VR", "True / False / Can't Tell",
      "Passage: \"The clinic opens at 9 am on weekdays.\" Statement: \"The clinic opens at 9 am on Saturdays.\" Based only on the passage, this statement is:",
-     "True", "False", "Can't tell", "Partly true", "C",
+     "True", "False", "Can't tell", "", "C",
      "The passage only mentions weekdays and says nothing about Saturdays, so there isn't enough information to judge — the answer is 'Can't tell'.", "Medium"),
     ("VR", "Inference & Author Tone",
      "Passage: \"Every member of the debating society must pass an entry assessment. Priya is a member of the debating society.\" Which conclusion follows?",
@@ -1258,11 +1298,11 @@ _QUESTIONS = [
      "The passage credits remote consultations with improving access while noting they cannot replace a physical examination — precisely option B. A and D are contradicted; C is never stated.", "Medium"),
     ("VR", "True / False / Can't Tell",
      "Passage: \"The new hospital wing was completed in 2019 and opened to patients in 2020.\" Statement: \"The new wing treated patients before 2020.\" Based only on the passage, this statement is:",
-     "True", "False", "Can't tell", "Partly true", "B",
+     "True", "False", "Can't tell", "", "B",
      "The passage says the wing opened to patients in 2020, so it did not treat patients before then. The statement is contradicted, making it False.", "Easy"),
     ("VR", "True / False / Can't Tell",
      "Passage: \"Dr Lee holds clinics on Mondays, Wednesdays and Fridays.\" Statement: \"Dr Lee never works at weekends.\" Based only on the passage, this statement is:",
-     "True", "False", "Can't tell", "Partly true", "C",
+     "True", "False", "Can't tell", "", "C",
      "The passage lists the weekdays Dr Lee holds clinics but says nothing about weekends, so there isn't enough information to judge the statement — the answer is 'Can't tell'.", "Medium"),
     ("VR", "Inference & Author Tone",
      "Passage: \"Yet another so-called breakthrough diet promises miracles while quietly ignoring the basic arithmetic of calories.\" The author's tone toward the diet is best described as:",
@@ -1398,23 +1438,23 @@ _QUESTIONS = [
      "The passage explicitly says the direction of cause and effect is unclear, supporting B. A overstates certainty, C contradicts the stated link, and D is too strong to be supported.", "Easy"),
     ("VR", "True / False / Can't Tell",
      "Passage: \"The pharmacy on the ground floor is open from 8 am to 6 pm, Monday to Friday.\" Statement: \"The pharmacy is open on Saturdays.\" Based only on the passage, this statement is:",
-     "True", "False", "Can't tell", "Partly true", "C",
+     "True", "False", "Can't tell", "", "C",
      "The passage only covers Monday to Friday and says nothing about Saturdays, so there is not enough information to judge — the answer is 'Can't tell'.", "Easy"),
     ("VR", "True / False / Can't Tell",
      "Passage: \"Every nurse on the night shift must complete a handover report before leaving the ward.\" Statement: \"A nurse who left the ward without completing a handover report broke ward policy.\" Based only on the passage, this statement is:",
-     "True", "False", "Can't tell", "Partly true", "A",
+     "True", "False", "Can't tell", "", "A",
      "The passage states the handover report must be completed before leaving; leaving without doing so directly breaks the stated policy, so the statement is True.", "Medium"),
     ("VR", "True / False / Can't Tell",
      "Passage: \"The new MRI scanner was installed in March 2023 and became available for patient use in June 2023.\" Statement: \"The scanner was used on patients in April 2023.\" Based only on the passage, this statement is:",
-     "True", "False", "Can't tell", "Partly true", "B",
+     "True", "False", "Can't tell", "", "B",
      "The passage states the scanner only became available for patient use in June 2023, so it could not have been used on patients in April 2023 — the statement is False.", "Easy"),
     ("VR", "True / False / Can't Tell",
      "Passage: \"Dr Adeyemi specialises in paediatric cardiology and consults at the regional hospital every Tuesday and Thursday.\" Statement: \"Dr Adeyemi never sees patients on Mondays.\" Based only on the passage, this statement is:",
-     "True", "False", "Can't tell", "Partly true", "C",
+     "True", "False", "Can't tell", "", "C",
      "The passage states which days Dr Adeyemi consults at this hospital but does not rule out other clinical activity elsewhere, so there isn't enough information to judge the statement — 'Can't tell'.", "Medium"),
     ("VR", "True / False / Can't Tell",
      "Passage: \"The trial enrolled 500 participants, of whom 260 received the experimental treatment and the remainder received the standard treatment.\" Statement: \"More participants received the experimental treatment than the standard treatment.\" Based only on the passage, this statement is:",
-     "True", "False", "Can't tell", "Partly true", "A",
+     "True", "False", "Can't tell", "", "A",
      "260 received the experimental treatment, so 240 received the standard treatment (500 − 260). Since 260 is greater than 240, the statement is directly confirmed by the passage's numbers — True.", "Medium"),
     ("VR", "Inference & Author Tone",
      "Passage: \"It is, apparently, revolutionary: a supplement that promises to reverse aging, boost intelligence, and cure fatigue — all without a shred of peer-reviewed evidence.\" The author's tone is best described as:",
@@ -1737,39 +1777,39 @@ _QUESTIONS = [
      "Directly matches \"only a third...this year\" and \"results...not yet available\". A over-claims, since no results exist yet; C and D are contradicted or unsupported.", "Easy"),
     ("VR", "True / False / Can't Tell",
      "Passage: \"The outpatient clinic sees adult patients only; children are referred to the paediatric unit across the road.\" Statement: \"A child would not be treated at the outpatient clinic.\" Based only on the passage, this statement is:",
-     "True", "False", "Can't tell", "Partly true", "A",
+     "True", "False", "Can't tell", "", "A",
      "The passage directly states the clinic sees adults only and refers children elsewhere, so the statement follows directly — True.", "Easy"),
     ("VR", "True / False / Can't Tell",
      "Passage: \"The consultant's research team published three papers in 2023, all on cardiovascular topics.\" Statement: \"The consultant's team has never published on any topic other than cardiovascular disease.\" Based only on the passage, this statement is:",
-     "True", "False", "Can't tell", "Partly true", "C",
+     "True", "False", "Can't tell", "", "C",
      "The passage only describes the team's 2023 output; it says nothing about other years, so there isn't enough information to judge the broader claim — Can't tell.", "Medium"),
     ("VR", "True / False / Can't Tell",
      "Passage: \"Staff must badge in and out of the secure medicines cupboard, and every entry is logged automatically.\" Statement: \"There is a record of every time the medicines cupboard was accessed.\" Based only on the passage, this statement is:",
-     "True", "False", "Can't tell", "Partly true", "A",
+     "True", "False", "Can't tell", "", "A",
      "Automatic logging of every entry directly means a record exists for every access — True.", "Easy"),
     ("VR", "True / False / Can't Tell",
      "Passage: \"The hospital's car park has 200 spaces reserved for staff and 150 for visitors.\" Statement: \"The hospital's car park has more staff spaces than visitor spaces.\" Based only on the passage, this statement is:",
-     "True", "False", "Can't tell", "Partly true", "A",
+     "True", "False", "Can't tell", "", "A",
      "200 is greater than 150, so the statement is directly confirmed by the passage's own figures — True.", "Easy"),
     ("VR", "True / False / Can't Tell",
      "Passage: \"The trial's second phase will begin once the first phase's safety data has been reviewed by the ethics board.\" Statement: \"The ethics board has already reviewed the first phase's safety data.\" Based only on the passage, this statement is:",
-     "True", "False", "Can't tell", "Partly true", "C",
+     "True", "False", "Can't tell", "", "C",
      "The passage describes a condition for phase two to begin but does not state whether that review has already taken place — Can't tell.", "Medium"),
     ("VR", "True / False / Can't Tell",
      "Passage: \"Of the 40 students in the cohort, 25 chose a surgical elective and the rest chose a medical elective.\" Statement: \"Fewer than half the cohort chose a medical elective.\" Based only on the passage, this statement is:",
-     "True", "False", "Can't tell", "Partly true", "A",
+     "True", "False", "Can't tell", "", "A",
      "The medical elective group is 40 − 25 = 15 students, which is fewer than half of 40 (20), so the statement is confirmed — True.", "Medium"),
     ("VR", "True / False / Can't Tell",
      "Passage: \"The new drug was approved for use in adults in 2022.\" Statement: \"The new drug is approved for use in children as of 2022.\" Based only on the passage, this statement is:",
-     "True", "False", "Can't tell", "Partly true", "C",
+     "True", "False", "Can't tell", "", "C",
      "The passage only states approval for adults; it neither confirms nor rules out approval for children, so there isn't enough information to judge — Can't tell.", "Medium"),
     ("VR", "True / False / Can't Tell",
      "Passage: \"The morning shift runs from 7am to 3pm, and the afternoon shift from 3pm to 11pm.\" Statement: \"There is a shift that covers the hours between 11pm and 7am.\" Based only on the passage, this statement is:",
-     "True", "False", "Can't tell", "Partly true", "C",
+     "True", "False", "Can't tell", "", "C",
      "The passage names two shifts but never states that these are the only shifts that exist, so whether an overnight shift covers 11pm–7am cannot be determined — Can't tell.", "Hard"),
     ("VR", "True / False / Can't Tell",
      "Passage: \"Every applicant who scored above 650 in the aptitude test was invited to interview. Maya was invited to interview.\" Statement: \"Maya scored above 650 in the aptitude test.\" Based only on the passage, this statement is:",
-     "True", "False", "Can't tell", "Partly true", "C",
+     "True", "False", "Can't tell", "", "C",
      "The passage tells us scoring above 650 guarantees an invitation, but not that invitation only happens this way. Maya being invited does not confirm she scored above 650 — this is a classic converse-error trap. Can't tell.", "Hard"),
     ("VR", "Inference & Author Tone",
      "Passage: \"The minister's statement that 'lessons will be learned' has, by now, become a familiar refrain after every public inquiry — reassuring in theory, but rarely followed by any account of what actually changed.\" The author's tone is best described as:",
@@ -2219,12 +2259,12 @@ _PASSAGE_SETS = [
      [
          ("Statement: The exact original height of the Pharos is known with certainty. "
           "Based only on the passage, this statement is:",
-          "True", "False", "Can't tell", "Partly true", "B",
+          "True", "False", "Can't tell", "", "B",
           "The passage says estimates range from about 100 to 140 metres with 'no consensus' among modern "
           "scholars, so the exact height is not known — the statement is contradicted, making it False.", "Medium"),
          ("Statement: The mirror said to sit at the summit could burn enemy ships far out at sea. "
           "Based only on the passage, this statement is:",
-          "True", "False", "Can't tell", "Partly true", "C",
+          "True", "False", "Can't tell", "", "C",
           "The passage reports this only as a later legend 'unsupported by any contemporary source'. It "
           "neither confirms nor denies the claim, so there isn't enough information to judge it — Can't tell. "
           "Note the trap: 'unsupported' is not the same as proven false.", "Hard"),
@@ -2238,7 +2278,7 @@ _PASSAGE_SETS = [
           "the damage came from 'a series of earthquakes', progressively — not one event.", "Medium"),
          ("Statement: The Pharos was completed on the orders of Ptolemy II. "
           "Based only on the passage, this statement is:",
-          "True", "False", "Can't tell", "Partly true", "A",
+          "True", "False", "Can't tell", "", "A",
           "This is stated directly: 'completed around 280 BCE on the orders of Ptolemy II'.", "Easy"),
      ]),
 
@@ -2261,7 +2301,7 @@ _PASSAGE_SETS = [
      [
          ("Statement: The dialect a white-crowned sparrow sings is fixed by the region its parents came "
           "from. Based only on the passage, this statement is:",
-          "True", "False", "Can't tell", "Partly true", "B",
+          "True", "False", "Can't tell", "", "B",
           "Playback experiments showed young birds learn whatever dialect they hear, so the dialect depends "
           "on what a bird hears, 'not on where its parents came from' — the statement is contradicted, "
           "making it False.", "Medium"),
@@ -2275,7 +2315,7 @@ _PASSAGE_SETS = [
           "number ... at dialect boundaries', not typical.", "Medium"),
          ("Statement: Scientists agree on the purpose that song dialects serve. "
           "Based only on the passage, this statement is:",
-          "True", "False", "Can't tell", "Partly true", "B",
+          "True", "False", "Can't tell", "", "B",
           "The passage says 'the function of these dialects is debated' and sets out two competing "
           "hypotheses, so there is no agreement — the statement is contradicted, making it False.", "Medium"),
          ("According to the passage, the 'bilingual' birds:",
@@ -2315,16 +2355,16 @@ _PASSAGE_SETS = [
           "role; and botanists grew it as a curiosity, not as something always deemed poisonous.", "Medium"),
          ("Statement: Distrust of the potato was partly because it was not mentioned in the Bible. "
           "Based only on the passage, this statement is:",
-          "True", "False", "Can't tell", "Partly true", "A",
+          "True", "False", "Can't tell", "", "A",
           "This reason is stated directly in the passage.", "Easy"),
          ("Statement: The potato produced fewer calories per acre than the competing grain crops. "
           "Based only on the passage, this statement is:",
-          "True", "False", "Can't tell", "Partly true", "B",
+          "True", "False", "Can't tell", "", "B",
           "The passage says it 'yielded more calories per acre than the grain crops it competed with' — the "
           "statement is contradicted, making it False.", "Medium"),
          ("Statement: Parmentier really did post guards around his potato field to make the crop seem "
           "valuable. Based only on the passage, this statement is:",
-          "True", "False", "Can't tell", "Partly true", "C",
+          "True", "False", "Can't tell", "", "C",
           "The passage attributes the guarding to 'a popular story' and does not vouch for whether it "
           "actually happened, so there isn't enough information to treat it as fact — Can't tell.", "Hard"),
      ]),
@@ -2347,12 +2387,12 @@ _PASSAGE_SETS = [
      [
          ("Statement: Before the nineteenth century, all British towns kept exactly the same time. "
           "Based only on the passage, this statement is:",
-          "True", "False", "Can't tell", "Partly true", "B",
+          "True", "False", "Can't tell", "", "B",
           "Towns kept their own local time, differing by several minutes — the statement is contradicted, "
           "making it False.", "Medium"),
          ("Statement: A single legal time for the whole of Great Britain was fixed by statute before 1850. "
           "Based only on the passage, this statement is:",
-          "True", "False", "Can't tell", "Partly true", "B",
+          "True", "False", "Can't tell", "", "B",
           "The railways synchronised to Greenwich by 1847, but the statute fixing a single legal time came "
           "in 1880 — so the statement is contradicted, making it False.", "Hard"),
          ("Which statement is best supported by the passage on the standardisation of time?",
@@ -2365,7 +2405,7 @@ _PASSAGE_SETS = [
           "contradicts that; some towns resisted 'for years'; and the zones came later.", "Medium"),
          ("Statement: The standard time signal was distributed using telegraph lines running beside the "
           "railway tracks. Based only on the passage, this statement is:",
-          "True", "False", "Can't tell", "Partly true", "A",
+          "True", "False", "Can't tell", "", "A",
           "This is stated directly: the signal was sent 'along the telegraph lines that ran beside the "
           "tracks'.", "Easy"),
      ]),
@@ -2403,12 +2443,12 @@ _PASSAGE_SETS = [
           "productive feature of the city'.", "Medium"),
          ("Statement: The government of the day welcomed the free political discussion in the coffee "
           "houses. Based only on the passage, this statement is:",
-          "True", "False", "Can't tell", "Partly true", "B",
+          "True", "False", "Can't tell", "", "B",
           "The authorities were 'uneasy', suspected sedition, and even tried to close the houses — the "
           "statement is contradicted, making it False.", "Medium"),
          ("Statement: A single cup of coffee in these houses cost a penny. "
           "Based only on the passage, this statement is:",
-          "True", "False", "Can't tell", "Partly true", "A",
+          "True", "False", "Can't tell", "", "A",
           "Stated directly: 'the price of a penny — the cost of a single cup'.", "Easy"),
      ]),
 
@@ -2439,7 +2479,7 @@ _PASSAGE_SETS = [
           "memory; and D overstates what is known.", "Medium"),
          ("Statement: Slow-wave sleep is more common in the early part of the night. "
           "Based only on the passage, this statement is:",
-          "True", "False", "Can't tell", "Partly true", "A",
+          "True", "False", "Can't tell", "", "A",
           "Stated directly: 'slow-wave sleep, which dominates the early part of the night'.", "Easy"),
          ("Which statement about sleep and memory is best supported by the passage?",
           "Rapid-eye-movement sleep is most important for factual memories",
@@ -2471,17 +2511,20 @@ _PASSAGE_SETS = [
      "Each session is billed at a flat rate of £40. Use the table to answer the questions.",
      [
          ("How many new patients were referred to the clinic over the whole year?",
-          "480", "400", "500", "520", "C",
+          "480", "400", "500", "520", "620", "C",
           "120 + 150 + 90 + 140 = 500 patients.", "Easy"),
          ("What was the total number of sessions delivered to Q3 patients?",
-          "720", "450", "640", "900", "A",
+          "720", "450", "640", "900", "810", "A",
           "90 patients × 8 sessions each = 720 sessions.", "Medium"),
          ("What was the total billing revenue from Q1 patients, at £40 per session?",
-          "£4,800", "£28,800", "£19,200", "£30,000", "B",
+          "£4,800", "£28,800", "£19,200", "£30,000", "£24,000", "B",
           "Q1 sessions = 120 × 6 = 720; revenue = 720 × £40 = £28,800.", "Medium"),
-         ("In which quarter did patients attend the greatest total number of sessions?",
-          "Q1", "Q2", "Q3", "Q4", "B",
-          "Totals: Q1 = 720, Q2 = 150 × 5 = 750, Q3 = 720, Q4 = 140 × 5 = 700. Q2 is highest at 750.", "Hard"),
+         ("Across the whole year, what was the mean number of sessions attended per patient, "
+          "to one decimal place?",
+          "6.0", "5.8", "5.5", "6.2", "5.9", "B",
+          "Total sessions = 720 + 750 + 720 + 700 = 2,890; total patients = 500; "
+          "2,890 ÷ 500 = 5.78 ≈ 5.8 sessions per patient. (Note: this is not the mean of the four "
+          "quarterly averages, because the quarters have different patient numbers.)", "Hard"),
      ]),
 
     ("QR", "Ratios & Proportion",
@@ -2492,19 +2535,298 @@ _PASSAGE_SETS = [
      "constant rate over 30 minutes.",
      [
          ("What total mass of the drug should the 70 kg patient receive?",
-          "140 mg", "350 mg", "70 mg", "35 mg", "A",
+          "140 mg", "350 mg", "70 mg", "35 mg", "210 mg", "A",
           "70 kg × 2 mg/kg = 140 mg.", "Easy"),
          ("What volume of the 5 mg/mL stock solution contains this dose?",
-          "14 mL", "28 mL", "700 mL", "2.8 mL", "B",
+          "14 mL", "28 mL", "700 mL", "2.8 mL", "35 mL", "B",
           "140 mg ÷ 5 mg/mL = 28 mL.", "Medium"),
          ("Infused over 30 minutes, what is the average rate of drug delivery in mg per minute?",
-          "2.3 mg/min", "9.3 mg/min", "4.7 mg/min", "70 mg/min", "C",
+          "2.3 mg/min", "9.3 mg/min", "4.7 mg/min", "70 mg/min", "14 mg/min", "C",
           "140 mg ÷ 30 min ≈ 4.7 mg/min.", "Medium"),
-         ("A second patient weighs 85 kg and is prescribed the same 2 mg/kg dose. How much more drug does "
-          "this patient receive than the 70 kg patient?",
-          "15 mg", "30 mg", "45 mg", "170 mg", "B",
-          "(85 − 70) kg × 2 mg/kg = 30 mg more.", "Medium"),
+         ("A second patient weighs 85 kg and is prescribed the same 2 mg/kg dose. What volume of the "
+          "same stock solution is needed for this patient's dose?",
+          "30 mL", "34 mL", "17 mL", "42.5 mL", "170 mL", "B",
+          "85 kg × 2 mg/kg = 170 mg; 170 mg ÷ 5 mg/mL = 34 mL.", "Hard"),
      ]),
+
+    ("VR", "Reading for the Main Idea",
+     "The Antikythera Mechanism",
+     "In 1901, sponge divers exploring a shipwreck off the Greek island of Antikythera recovered, among "
+     "bronze and marble statues, a corroded lump of metal that would puzzle scholars for a century. X-ray "
+     "and later CT imaging revealed that the lump contained at least thirty interlocking bronze "
+     "gearwheels, some with teeth barely a millimetre apart. The device, now dated to roughly the second "
+     "century BCE, is generally regarded as an astronomical calculator: by turning a handle, a user could "
+     "model the motions of the Sun and Moon, predict eclipses, and track the four-year cycle of the "
+     "ancient Olympic Games. Nothing of comparable mechanical complexity is known from the following "
+     "thousand years; clockwork of similar sophistication does not reappear in the surviving record until "
+     "medieval Europe. Precisely who built the mechanism, and whether it was a unique object or one of "
+     "many, is unknown. Inscriptions on its surface, only partly legible, suggest it may have originated "
+     "in the Greek scientific tradition associated with figures such as Archimedes, though no direct link "
+     "has been proven. What is clear is that it overturns a once-common assumption that the ancient "
+     "Greeks, for all their achievements in mathematics and astronomy, did not translate their "
+     "theoretical knowledge into precision machinery.",
+     [
+         ("Which of the following best expresses the main point the author draws from the mechanism?",
+          "The ancient Greeks could turn advanced theoretical knowledge into precision machinery, "
+          "contrary to a former assumption",
+          "The mechanism was certainly built by Archimedes",
+          "Greek astronomy was more accurate than medieval astronomy",
+          "Sponge divers frequently recovered complex machines from shipwrecks", "A",
+          "The closing sentence states the mechanism 'overturns a once-common assumption' that the Greeks "
+          "did not build precision machinery. B is unproven in the text; C is never claimed; D is "
+          "unsupported.", "Medium"),
+         ("According to the passage, the mechanism could be used to:",
+          "predict eclipses and track the Olympic cycle",
+          "measure the temperature of seawater",
+          "calculate a ship's position at sea",
+          "print astronomical tables", "A",
+          "The passage says a user could 'predict eclipses, and track the four-year cycle of the ancient "
+          "Olympic Games'. The other uses are never mentioned.", "Medium"),
+         ("Which statement about the Antikythera mechanism is best supported by the passage?",
+          "No device of comparable mechanical complexity is known from the thousand years after it",
+          "The inscriptions on the mechanism have now been fully translated",
+          "Many identical mechanisms have since been discovered",
+          "The mechanism was manufactured in medieval Europe", "A",
+          "The text says 'nothing of comparable mechanical complexity is known from the following thousand "
+          "years'. The inscriptions are 'only partly legible'; whether it was 'one of many, is unknown'; "
+          "and it is dated to the second century BCE.", "Hard"),
+         ("The author's attitude towards the claim that Archimedes built the mechanism is best described "
+          "as:",
+          "cautious — it is offered as a possibility that has not been proven",
+          "certain that Archimedes built it",
+          "dismissive of any Greek origin",
+          "convinced that it is medieval", "A",
+          "The passage says it 'may have originated' in a tradition linked to Archimedes 'though no direct "
+          "link has been proven' — a deliberately cautious framing.", "Medium"),
+     ]),
+
+    ("VR", "True / False / Can't Tell",
+     "Urban Foxes",
+     "Red foxes have colonised many British cities over the past century, and urban populations now live "
+     "at higher densities than their rural counterparts. City foxes are not, as is sometimes assumed, a "
+     "separate species; they are the same animal that lives in the countryside, exploiting a different set "
+     "of resources. Studies fitting foxes with GPS collars have found that a typical urban fox holds a "
+     "territory of well under a square kilometre, far smaller than a rural territory, because food — much "
+     "of it discarded by people — is so concentrated. Contrary to popular belief, the animals are not "
+     "primarily scavengers of bins: analyses of their diet show that earthworms, insects, fruit and small "
+     "mammals still make up a large share of what they eat. Foxes are wary of humans and attacks on people "
+     "are very rare, although foxes will investigate gardens and can be bold when food is left out for "
+     "them. Numbers are thought to be limited less by human control efforts, which studies suggest have "
+     "little lasting effect on population size, than by the availability of territory and outbreaks of "
+     "disease such as mange. Councils that have tried to cull urban foxes have generally found that "
+     "vacated territories are quickly reoccupied by foxes from surrounding areas.",
+     [
+         ("Statement: Urban foxes are a different species from rural foxes. "
+          "Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "", "B",
+          "The passage states city foxes are 'not ... a separate species' — the statement is contradicted, "
+          "making it False.", "Medium"),
+         ("Statement: A typical urban fox's territory is smaller than a rural fox's. "
+          "Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "", "A",
+          "Stated directly: an urban territory is 'far smaller than a rural territory'.", "Easy"),
+         ("Statement: Culling has proven an effective long-term way of reducing urban fox numbers. "
+          "Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "", "B",
+          "The passage says control efforts have 'little lasting effect' and vacated territories are "
+          "'quickly reoccupied' — the statement is contradicted, making it False.", "Medium"),
+         ("Statement: Urban foxes carry more diseases than rural foxes. "
+          "Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "", "C",
+          "The passage mentions disease (mange) as one factor limiting numbers but never compares disease "
+          "rates between urban and rural foxes, so there isn't enough information — Can't tell.", "Hard"),
+     ]),
+
+    ("QR", "Tables, Charts & Data",
+     "Café Weekly Takings",
+     "A café records its takings (in £) from three product lines over one week:\n\n"
+     "| Day | Coffee | Pastries | Sandwiches |\n"
+     "|---|---|---|---|\n"
+     "| Mon | 180 | 90 | 120 |\n"
+     "| Tue | 200 | 110 | 140 |\n"
+     "| Wed | 160 | 80 | 130 |\n"
+     "| Thu | 220 | 120 | 150 |\n"
+     "| Fri | 300 | 160 | 210 |\n\n"
+     "Use the table to answer the questions.",
+     [
+         ("What were the café's total takings from coffee over the week?",
+          "£1,060", "£980", "£1,120", "£1,000", "£940", "A",
+          "180 + 200 + 160 + 220 + 300 = £1,060.", "Easy"),
+         ("On which day were the combined takings from all three lines highest?",
+          "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "E",
+          "Daily totals: Mon 390, Tue 450, Wed 370, Thu 490, Fri 670. Friday is highest.", "Medium"),
+         ("Pastries made up what percentage of Friday's total takings, to the nearest whole number?",
+          "24%", "20%", "27%", "16%", "30%", "A",
+          "Friday pastries £160 out of a £670 total: 160 ÷ 670 = 23.9% ≈ 24%.", "Hard"),
+         ("By what percentage did coffee takings rise from Wednesday to Friday?",
+          "87.5%", "140%", "46.7%", "75%", "112.5%", "A",
+          "Rise = 300 − 160 = 140 on a base of 160: 140 ÷ 160 = 0.875 = 87.5%. (46.7% wrongly divides by "
+          "the new figure, 300.)", "Hard"),
+     ]),
+
+    ("QR", "Speed, Distance & Time",
+     "A Week of Training Runs",
+     "A runner preparing for a race trains on four days in one week. Her distances and times are:\n\n"
+     "| Day | Distance (km) | Time |\n"
+     "|---|---|---|\n"
+     "| Tue | 8 | 48 min |\n"
+     "| Thu | 10 | 55 min |\n"
+     "| Sat | 21 | 2 h 6 min |\n"
+     "| Sun | 6 | 33 min |\n\n"
+     "Use the table to answer the questions.",
+     [
+         ("What total distance did she run during the week?",
+          "45 km", "44 km", "46 km", "39 km", "51 km", "A",
+          "8 + 10 + 21 + 6 = 45 km.", "Easy"),
+         ("What was her average speed on Tuesday, in km/h?",
+          "10", "9.6", "12", "8", "6.7", "A",
+          "8 km in 48 min = 8 ÷ (48/60) = 8 ÷ 0.8 = 10 km/h.", "Medium"),
+         ("On the Saturday run, what was her average pace in minutes per kilometre?",
+          "6 min/km", "5 min/km", "6.3 min/km", "7 min/km", "5.5 min/km", "A",
+          "2 h 6 min = 126 min over 21 km: 126 ÷ 21 = 6 minutes per kilometre.", "Medium"),
+         ("If she held her Thursday speed for a full 42.2 km marathon, how long would it take, to the "
+          "nearest minute?",
+          "232 min", "220 min", "240 min", "210 min", "255 min", "A",
+          "Thursday pace = 55 min ÷ 10 km = 5.5 min/km; 42.2 × 5.5 = 232.1 ≈ 232 min (about 3 h 52 min).",
+          "Hard"),
+     ]),
+
+    ("SJT", "Appropriateness Ratings",
+     "A Colleague Who Smells of Alcohol",
+     "Rajiv, a first-year medical student, is on a ward placement, shadowing a junior doctor for the "
+     "shift. He notices that the doctor smells strongly of alcohol and is slurring slightly as she "
+     "prepares to review a patient's medication. Rate the appropriateness of each of the following "
+     "responses by Rajiv, taking each in turn.",
+     [
+         ("How appropriate is it for Rajiv to raise his concern promptly and discreetly with the "
+          "supervising senior doctor or the nurse in charge?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not ideal", "A very inappropriate thing to do", "A",
+          "Patient safety comes first. Raising the concern promptly with someone senior, and doing so "
+          "discreetly, is exactly the professional response the GMC expects.", "Medium"),
+         ("How appropriate is it for Rajiv to say nothing and continue the placement as planned?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not ideal", "A very inappropriate thing to do", "D",
+          "Staying silent leaves patients exposed to a foreseeable risk of harm. Failing to act on a clear "
+          "patient-safety concern is very inappropriate.", "Medium"),
+         ("How appropriate is it for Rajiv to confront the doctor loudly about being drunk in front of "
+          "waiting patients?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not ideal", "A very inappropriate thing to do", "C",
+          "Flagging the concern is right, but doing it publicly humiliates the colleague and breaches "
+          "professionalism and patient dignity — the right instinct carried out in the wrong way.", "Hard"),
+         ("How appropriate is it for Rajiv to offer to carry out the patient's medication review himself "
+          "so the patient is not affected?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not ideal", "A very inappropriate thing to do", "D",
+          "A first-year student is not competent to perform a medication review unsupervised; acting "
+          "beyond his competence creates a new patient-safety risk. Very inappropriate.", "Hard"),
+     ]),
+
+    ("SJT", "Importance Ratings",
+     "A Confidentiality Breach on Social Media",
+     "A patient tells Sara, a medical student, that she has seen a photograph on social media, posted by a "
+     "member of the clinical team, in which a patient's chart is visible. Sara is deciding how to respond. "
+     "Rate how important each of the following considerations is in deciding what she should do.",
+     [
+         ("How important is it for Sara to consider whether the post breaches patient confidentiality?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "A",
+          "Confidentiality is a core professional duty. Whether the post breaches it goes to the heart of "
+          "the problem, so it is very important.", "Medium"),
+         ("How important is it for Sara to consider whether the team member is a personal friend of hers?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "D",
+          "A personal friendship should not affect a professional duty to protect patients. This "
+          "consideration is not important at all.", "Medium"),
+         ("How important is it for Sara to consider whether the patient in the photograph could be "
+          "identified by others?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "B",
+          "Identifiability affects how serious the breach is and how urgently it must be handled, so it is "
+          "an important — though not the single decisive — consideration.", "Hard"),
+         ("How important is it for Sara to consider whether she has a duty to raise the concern even "
+          "though she is only a student?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "A",
+          "The duty to protect patients and to raise concerns applies to students too; recognising that "
+          "duty is very important to deciding she should act.", "Hard"),
+     ]),
+]
+
+# standalone questions (no shared passage): (subject_code, topic_name, stem,
+#   A, B, C, D, E, correct, explanation, difficulty). E may be "" when the format
+#   uses four options. Used for Decision Making, which the real UCAT presents as
+#   individual four-option items across several reasoning types.
+_STANDALONE_QUESTIONS = [
+    ("DM", "Syllogisms & Logical Deduction",
+     "All members of the surgical team scrubbed in before the operation. Nurse Bello scrubbed in before "
+     "the operation. Which conclusion necessarily follows?",
+     "Nurse Bello is a member of the surgical team",
+     "Nurse Bello is not a member of the surgical team",
+     "It cannot be determined whether Nurse Bello is a member of the surgical team",
+     "No members of the surgical team scrubbed in", "", "C",
+     "Scrubbing in does not imply team membership — others (anaesthetists, students) also scrub in. Bello "
+     "meeting the condition tells us nothing about membership, so no conclusion can be drawn. Concluding "
+     "otherwise is the classic error of affirming the consequent.", "Hard"),
+    ("DM", "Syllogisms & Logical Deduction",
+     "No viruses are affected by antibiotics. The common cold is caused by a virus. Which conclusion "
+     "necessarily follows?",
+     "Antibiotics are the best treatment for the common cold",
+     "The common cold is not affected by antibiotics",
+     "All illnesses caused by viruses are colds",
+     "Antibiotics affect some viruses", "", "B",
+     "If no virus is affected by antibiotics and the cold is viral, it follows necessarily that the cold "
+     "is not affected by antibiotics. The other options either contradict the premises or add unstated "
+     "information.", "Medium"),
+    ("DM", "Logic Puzzles & Arrangements",
+     "Four doctors — P, Q, R and S — are each on call on exactly one of four consecutive nights, Monday "
+     "to Thursday. P is on call the night immediately before Q. R is on call on neither Monday nor "
+     "Thursday. Which one of the following must be true?",
+     "P is on call on Monday",
+     "R is on call on Wednesday",
+     "Q is on call on either Tuesday or Thursday",
+     "S is on call on Monday", "", "C",
+     "Only two arrangements satisfy the clues: (Mon P, Tue Q, Wed R, Thu S) and (Mon S, Tue R, Wed P, "
+     "Thu Q). Across both, Q is on Tuesday or Thursday — the only statement that must hold. Each other "
+     "option is true in just one of the two arrangements.", "Hard"),
+    ("DM", "Venn Diagrams & Sets",
+     "In a cohort of 200 patients, 130 received drug X, 90 received drug Y, and 50 received both. How "
+     "many received neither drug?",
+     "30", "20", "50", "40", "", "A",
+     "Received at least one = 130 + 90 − 50 = 170. Neither = 200 − 170 = 30.", "Medium"),
+    ("DM", "Venn Diagrams & Sets",
+     "A survey of 80 staff found that 45 cycle to work and 30 walk, with 12 doing both on different days. "
+     "What fraction of the staff neither cycle nor walk to work?",
+     "17/80", "13/80", "1/4", "21/80", "", "A",
+     "Cycle or walk = 45 + 30 − 12 = 63. Neither = 80 − 63 = 17, i.e. 17/80 of the staff.", "Hard"),
+    ("DM", "Probability & Statistics",
+     "A bag contains 4 red and 6 blue counters. Two counters are drawn at random without replacement. "
+     "Which one of the following statements is correct?",
+     "The probability that both counters are red is 2/15",
+     "The probability that both counters are red is 4/25",
+     "The probability that both counters are blue is 3/5",
+     "The probability of one red then one blue is 4/10 × 6/10", "", "A",
+     "Without replacement, P(both red) = 4/10 × 3/9 = 12/90 = 2/15. Option B uses 'with replacement' "
+     "(0.4²); C and D also ignore that the counter is not replaced, so the second draw is out of 9.",
+     "Hard"),
+    ("DM", "Syllogisms & Logical Deduction",
+     "Should hospitals routinely offer every patient over 50 a whole-body MRI scan as a screening test? "
+     "Select the strongest argument.",
+     "No — whole-body scans frequently reveal harmless abnormalities that trigger unnecessary invasive "
+     "follow-up and anxiety, with no evidence of improved survival",
+     "Yes — MRI machines are expensive, so they should be used as much as possible",
+     "No — some patients dislike being inside an enclosed scanner",
+     "Yes — detecting any abnormality early is always beneficial", "", "A",
+     "The strongest argument is relevant, evidence-based and weighs real harms against benefits — exactly "
+     "what A does. B is a sunk-cost fallacy, C is minor, and D is an unsupported overgeneralisation.",
+     "Hard"),
+    ("DM", "Syllogisms & Logical Deduction",
+     "Should medical students be allowed to view patients' full electronic records during placements? "
+     "Select the strongest argument.",
+     "Yes — reviewing complete records under supervision develops clinical reasoning, and existing access "
+     "rules already protect confidentiality",
+     "Yes — students are the doctors of the future",
+     "No — patient records contain a great deal of information",
+     "No — students might simply find the records interesting", "", "A",
+     "A is strongest: it links access to a concrete educational benefit while addressing the main "
+     "objection (confidentiality). B is a slogan, C is vague, and D raises a trivial concern.", "Medium"),
 ]
 
 # flashcards: (subject_code, topic_name, front, back)
@@ -2542,39 +2864,94 @@ def _sync_subject_colors():
         _close(conn)
 
 
-def _upsert_passage_sets(conn, code_to_id, topic_key_to_id):
-    """Idempotently insert passage-based question sets — a shared stimulus plus
-    its linked follow-up questions, matching real UCAT (especially VR) format.
-    Safe to run on an already-seeded database: passages are matched by title and
-    questions by stem, so nothing is duplicated or overwritten. Returns the
-    number of questions added."""
+# Legacy starter questions whose format does not match the real UCAT (Verbal
+# Reasoning items with tiny embedded snippets rather than a long passage, and
+# four-option Quantitative Reasoning items where the real test uses five). These
+# are retired — hidden from quizzes/mocks — rather than deleted, so any user
+# attempt history that references them is preserved. Decision Making and SJT
+# legacy items use valid four-option formats and are kept.
+_LEGACY_RETIRE_STEMS = {q[2] for q in _QUESTIONS if q[0] in ("VR", "QR")}
+
+
+def _unpack_question(qt):
+    """Accept either an 8-field question tuple (no option E) or a 9-field one
+    (with option E), returning a uniform 9-tuple with an empty string for a
+    missing fifth option."""
+    if len(qt) == 9:
+        return qt
+    stem, a, b, c, d, correct, expl, diff = qt
+    return (stem, a, b, c, d, "", correct, expl, diff)
+
+
+def _sync_content(conn, code_to_id, topic_key_to_id):
+    """Insert or refresh all exactly-UCAT-formatted content — passage sets and
+    standalone questions — keyed by stem. Existing seeded questions are updated
+    in place so format fixes (e.g. three-option True/False/Can't Tell, five-option
+    QR) reach already-seeded rows, while user-created questions (whose stems don't
+    match the seed) are left untouched. Returns the number of new questions added."""
     now = datetime.now().isoformat()
-    existing_titles = {r["title"]: r["id"] for r in _q(conn, "SELECT id, title FROM passages")}
-    existing_stems = {r["stem"] for r in _q(conn, "SELECT stem FROM questions")}
+    title_to_id = {r["title"]: r["id"] for r in _q(conn, "SELECT id, title FROM passages")}
+    existing = {r["stem"]: r["id"] for r in _q(conn, "SELECT id, stem FROM questions")}
     added = 0
+
+    def upsert_q(code, tname, pid, qt):
+        nonlocal added
+        stem, a, b, c, d, e, correct, expl, diff = _unpack_question(qt)
+        params = {"s": code_to_id[code], "t": topic_key_to_id.get((code, tname)), "p": pid,
+                  "stem": stem, "a": a, "b": b, "c": c, "d": d, "e": (e or None),
+                  "cor": correct, "ex": expl, "diff": diff, "ca": now}
+        if stem in existing:
+            params["id"] = existing[stem]
+            _run(conn, _n("""UPDATE questions SET subject_id=:s, topic_id=:t, passage_id=:p,
+                       option_a=:a, option_b=:b, option_c=:c, option_d=:d, option_e=:e,
+                       correct=:cor, explanation=:ex, difficulty=:diff, active=1 WHERE id=:id"""), params)
+        else:
+            existing[stem] = _run(conn, _n("""INSERT INTO questions (subject_id, topic_id, passage_id,
+                       stem, option_a, option_b, option_c, option_d, option_e, correct, explanation,
+                       difficulty, active, created_at)
+                       VALUES (:s,:t,:p,:stem,:a,:b,:c,:d,:e,:cor,:ex,:diff,1,:ca)"""), params)
+            added += 1
+
     for code, tname, title, body, questions in _PASSAGE_SETS:
         if code not in code_to_id:
             continue
-        pid = existing_titles.get(title)
+        pid = title_to_id.get(title)
         if pid is None:
             pid = _run(conn, _n("""INSERT INTO passages (subject_id, topic_id, title, body, created_at)
                        VALUES (:s,:t,:ti,:b,:ca)"""),
                        {"s": code_to_id[code], "t": topic_key_to_id.get((code, tname)),
                         "ti": title, "b": body, "ca": now})
-            existing_titles[title] = pid
-        for stem, a, b, c, d, correct, expl, diff in questions:
-            if stem in existing_stems:
-                continue
-            _run(conn, _n("""INSERT INTO questions (subject_id, topic_id, passage_id, stem, option_a,
-                       option_b, option_c, option_d, correct, explanation, difficulty, created_at)
-                       VALUES (:s,:t,:p,:stem,:a,:b,:c,:d,:cor,:e,:diff,:ca)"""),
-                 {"s": code_to_id[code], "t": topic_key_to_id.get((code, tname)), "p": pid,
-                  "stem": stem, "a": a, "b": b, "c": c, "d": d, "cor": correct,
-                  "e": expl, "diff": diff, "ca": now})
-            existing_stems.add(stem)
-            added += 1
+            title_to_id[title] = pid
+        keep = []
+        for qt in questions:
+            keep.append(_unpack_question(qt)[0])
+            upsert_q(code, tname, pid, qt)
+        # Retire any stale questions still attached to this passage whose stem is
+        # no longer in the current set (e.g. a question that was reworded), so an
+        # existing deployment stops serving the superseded version.
+        ph = _ph()
+        marks = ",".join([ph] * len(keep))
+        _run(conn, f"UPDATE questions SET active = 0 WHERE passage_id = {ph} "
+                   f"AND stem NOT IN ({marks})", tuple([pid] + keep))
+
+    for row in _STANDALONE_QUESTIONS:
+        code, tname = row[0], row[1]
+        if code not in code_to_id:
+            continue
+        upsert_q(code, tname, None, row[2:])
+
     _commit(conn)
     return added
+
+
+def _retire_legacy_questions(conn):
+    """Mark the format-nonconforming legacy VR/QR starter questions inactive so
+    they no longer appear in quizzes or mocks, without deleting them (which would
+    cascade-delete users' attempt history). Idempotent."""
+    ph = _ph()
+    for stem in _LEGACY_RETIRE_STEMS:
+        _run(conn, f"UPDATE questions SET active = 0 WHERE stem = {ph} AND passage_id IS NULL", (stem,))
+    _commit(conn)
 
 
 def seed_content():
@@ -2601,8 +2978,12 @@ def seed_content():
                        {"s": code_to_id[code], "n": name, "hy": hy, "sum": summary, "c": content, "ca": now})
             topic_key_to_id[(code, name)] = tid
         _commit(conn)
-        # Questions
+        # Questions — legacy starter items. VR/QR legacy formats don't match the
+        # real UCAT, so skip them here; the exactly-formatted content is loaded by
+        # _sync_content below. Decision Making and SJT legacy items are valid.
         for code, tname, stem, a, b, c, d, correct, expl, diff in _QUESTIONS:
+            if code in ("VR", "QR"):
+                continue
             _run(conn, _n("""INSERT INTO questions (subject_id, topic_id, stem, option_a, option_b,
                        option_c, option_d, correct, explanation, difficulty, created_at)
                        VALUES (:s,:t,:stem,:a,:b,:c,:d,:cor,:e,:diff,:ca)"""),
@@ -2616,8 +2997,8 @@ def seed_content():
                  {"s": code_to_id[code], "t": topic_key_to_id.get((code, tname)),
                   "f": front, "b": back, "due": today, "ca": now})
         _commit(conn)
-        # Passage-based question sets (long passage → linked questions)
-        _upsert_passage_sets(conn, code_to_id, topic_key_to_id)
+        # Exactly-UCAT-formatted content (passage sets + standalone questions)
+        _sync_content(conn, code_to_id, topic_key_to_id)
     finally:
         _close(conn)
 
@@ -2658,10 +3039,12 @@ def backfill_content():
             added_t += 1
         _commit(conn)
 
-        # Questions — insert any whose stem is not already present
+        # Questions — insert any legacy DM/SJT starter whose stem is absent. VR/QR
+        # legacy items are intentionally not added (their format is nonconforming)
+        # and any already present are retired below.
         existing_stems = {r["stem"] for r in _q(conn, "SELECT stem FROM questions")}
         for code, tname, stem, a, b, c, d, correct, expl, diff in _QUESTIONS:
-            if code not in code_to_id or stem in existing_stems:
+            if code not in code_to_id or code in ("VR", "QR") or stem in existing_stems:
                 continue
             _run(conn, _n("""INSERT INTO questions (subject_id, topic_id, stem, option_a, option_b,
                        option_c, option_d, correct, explanation, difficulty, created_at)
@@ -2684,9 +3067,12 @@ def backfill_content():
             added_f += 1
         _commit(conn)
 
-        # Passage-based question sets — idempotent, so an existing deployment
-        # picks up the long-passage → linked-question content without a reload.
-        added_q += _upsert_passage_sets(conn, code_to_id, topic_key_to_id)
+        # Exactly-UCAT-formatted content — inserts new passage/standalone questions
+        # and refreshes already-seeded ones (e.g. 3-option TFC, 5-option QR) in
+        # place, so an existing deployment updates without a manual reload.
+        added_q += _sync_content(conn, code_to_id, topic_key_to_id)
+        # Retire the format-nonconforming legacy VR/QR starter questions.
+        _retire_legacy_questions(conn)
     finally:
         _close(conn)
     return {"topics_added": added_t, "questions_added": added_q, "flashcards_added": added_f}

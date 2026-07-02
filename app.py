@@ -611,6 +611,16 @@ def _passage_units(pool):
     return units
 
 
+def _q_options(q):
+    """Ordered {letter: text} for a question, skipping blank/absent options so
+    each item shows exactly the number of choices its UCAT format uses — 3 for
+    Verbal Reasoning's True/False/Can't Tell, 4 for most items, 5 for
+    Quantitative Reasoning."""
+    pairs = [("A", q.get("option_a")), ("B", q.get("option_b")), ("C", q.get("option_c")),
+             ("D", q.get("option_d")), ("E", q.get("option_e"))]
+    return {k: v for k, v in pairs if v not in (None, "")}
+
+
 def _render_passage(q, quiz, idx):
     """Show the shared passage above a passage-linked question, and keep it
     visible for every question in the set — exactly as the real exam does."""
@@ -697,7 +707,7 @@ def page_practice():
     _render_passage(q, quiz, idx)
     st.markdown(f"### {q['stem']}")
 
-    options = {"A": q["option_a"], "B": q["option_b"], "C": q["option_c"], "D": q["option_d"]}
+    options = _q_options(q)
     answered = ss["quiz_answered"].get(idx)
 
     if not answered:
@@ -1537,8 +1547,9 @@ def page_manage():
             b = c[1].text_input("Option B")
             cc = c[0].text_input("Option C")
             d = c[1].text_input("Option D")
+            e = st.text_input("Option E (optional — Quantitative Reasoning uses five options)")
             c2 = st.columns(2)
-            correct = c2[0].selectbox("Correct answer", ["A", "B", "C", "D"])
+            correct = c2[0].selectbox("Correct answer", ["A", "B", "C", "D", "E"])
             diff = c2[1].selectbox("Difficulty", ["Easy", "Medium", "Hard"], index=1)
             expl = st.text_area("Explanation")
             if st.form_submit_button("Add question", type="primary"):
@@ -1546,15 +1557,16 @@ def page_manage():
                     db.upsert_question({
                         "subject_id": SUB_BY_NAME[sname]["id"], "stem": stem,
                         "option_a": a, "option_b": b, "option_c": cc, "option_d": d,
+                        "option_e": e or None,
                         "correct": correct, "explanation": expl, "difficulty": diff,
                     })
                     _invalidate_content_cache()
                     st.success("Question added.")
                     st.rerun()
                 else:
-                    st.warning("Fill in the stem and all four options.")
+                    st.warning("Fill in the stem and at least options A–D.")
         st.divider()
-        qs = cached_questions()
+        qs = db.get_questions(include_inactive=True)
         search = st.text_input("🔍 Search questions", key="mq_search",
                                 placeholder="Filter by keyword or subtest…")
         filtered = qs
@@ -1564,8 +1576,9 @@ def page_manage():
                        or needle in SUB_BY_ID.get(q["subject_id"], {}).get("name", "").lower()]
         st.caption(f"{len(filtered)} of {len(qs)} questions" if search else f"{len(qs)} questions in the bank")
         for q in _paginate(filtered, "mq_page"):
-            with st.expander(f"[{SUB_BY_ID.get(q['subject_id'],{}).get('name','?')}] {q['stem'][:70]}"):
-                st.markdown(f"**Correct:** {q['correct']} · **Difficulty:** {q['difficulty']}")
+            retired = "" if (q.get("active") in (1, None)) else " · 🚫 retired"
+            with st.expander(f"[{SUB_BY_ID.get(q['subject_id'],{}).get('name','?')}] {q['stem'][:70]}{retired}"):
+                st.markdown(f"**Correct:** {q['correct']} · **Difficulty:** {q['difficulty']}{retired}")
                 st.caption(q.get("explanation") or "")
                 if st.button("Delete", key=f"delq_{q['id']}"):
                     db.delete_question(q["id"])
@@ -1743,8 +1756,8 @@ def page_mock():
                 ok = chosen == q["correct"]
                 mark = "✅" if ok else ("❌" if chosen else "⏭️")
                 st.markdown(f"{mark} **{q['stem'][:90]}**")
-                opts = {"A": q["option_a"], "B": q["option_b"], "C": q["option_c"], "D": q["option_d"]}
-                st.caption(f"Your answer: {chosen or '— (skipped)'} · Correct: {q['correct']} ({opts[q['correct']]})")
+                opts = _q_options(q)
+                st.caption(f"Your answer: {chosen or '— (skipped)'} · Correct: {q['correct']} ({opts.get(q['correct'], '?')})")
                 if q.get("explanation"):
                     st.caption(f"💡 {q['explanation']}")
 
@@ -1832,7 +1845,7 @@ def page_mock():
     _render_passage(q, quiz, idx)
     st.markdown(f"### {q['stem']}")
 
-    options = {"A": q["option_a"], "B": q["option_b"], "C": q["option_c"], "D": q["option_d"]}
+    options = _q_options(q)
     prev = ss["mock_answers"].get(idx)
     choice = st.radio("Choose one:", list(options.keys()),
                       format_func=lambda k: f"{k}. {options[k]}",
