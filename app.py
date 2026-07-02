@@ -210,15 +210,16 @@ button[kind^="secondary"]:hover { border-color: var(--teal) !important; color: v
 [data-testid="stTab"][aria-selected="true"] { color: var(--teal) !important; font-weight: 600 !important; }
 [data-baseweb="tab-highlight"] { background-color: var(--teal) !important; }
 
-/* Top navigation bar — one continuous green bar, gray clickable labels */
+/* Top navigation bar — one continuous bar (matching the sidebar's dark ink),
+   gray clickable labels, no emoji */
 .st-key-topnav {
-    background: var(--teal); border-radius: 999px;
-    padding: 6px 8px; margin-bottom: 22px; box-shadow: 0 2px 6px rgba(12,107,88,0.25);
+    background: var(--ink); border-radius: 12px; width: 100% !important;
+    padding: 6px 8px; margin-bottom: 22px; box-shadow: 0 2px 6px rgba(0,0,0,0.18);
 }
 .st-key-topnav [data-testid="stHorizontalBlock"] { gap: 2px !important; flex-wrap: nowrap !important; }
 .st-key-topnav [data-testid="column"] { min-width: 0 !important; }
 .st-key-topnav button {
-    border-radius: 999px !important; border: none !important;
+    border-radius: 8px !important; border: none !important;
     background: transparent !important; color: rgba(239,241,236,0.62) !important;
     font-family: var(--sans) !important; font-weight: 600 !important; font-size: 12.5px !important;
     padding: 8px 2px !important; min-height: 38px; white-space: nowrap !important;
@@ -229,12 +230,12 @@ button[kind^="secondary"]:hover { border-color: var(--teal) !important; color: v
     overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important;
 }
 .st-key-topnav button:hover {
-    background: rgba(255,255,255,0.12) !important; color: rgba(255,255,255,0.9) !important;
+    background: rgba(255,255,255,0.10) !important; color: rgba(255,255,255,0.9) !important;
 }
 .st-key-topnav button[kind="primary"] {
-    background: rgba(255,255,255,0.20) !important; color: #FFFFFF !important; font-weight: 700 !important;
+    background: var(--teal-bright) !important; color: #FFFFFF !important; font-weight: 700 !important;
 }
-.st-key-topnav button[kind="primary"]:hover { background: rgba(255,255,255,0.26) !important; }
+.st-key-topnav button[kind="primary"]:hover { background: var(--teal) !important; }
 .st-key-topnav button p { font-family: var(--sans) !important; font-weight: inherit !important; }
 
 /* Metrics */
@@ -486,7 +487,7 @@ with st.container(key="topnav"):
     for col, (full_key, icon, short) in zip(cols, NAV_ITEMS):
         active = st.session_state["nav_page"] == full_key
         with col:
-            if st.button(f"{icon} {short}", key=f"nav_btn_{full_key}",
+            if st.button(short, key=f"nav_btn_{full_key}",
                          type="primary" if active else "secondary", width="stretch"):
                 st.session_state["nav_page"] = full_key
                 st.rerun()
