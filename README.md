@@ -29,6 +29,11 @@ covering the four current subtests:
 - **🤖 AI Tutor** — chat with Claude for worked examples and exam strategy
   (requires `ANTHROPIC_API_KEY`).
 - **⚙️ Manage** — add your own questions, flashcards, topics, and set the exam date.
+- **👤 Accounts** — each student signs in with their own username/password.
+  Practice attempts, flashcard progress, study tasks, chat history, and exam
+  date are all tracked per account, so sharing a deployment doesn't mix up
+  anyone's stats. The question/flashcard/topic content bank itself is shared
+  across accounts.
 
 The app ships with starter content across every subtest so it's useful immediately.
 
@@ -53,7 +58,7 @@ Set these as environment variables or in `.streamlit/secrets.toml`:
 | --- | --- |
 | `DATABASE_URL` | Neon / PostgreSQL connection string. Falls back to SQLite if unset. |
 | `ANTHROPIC_API_KEY` | Enables the AI Tutor. |
-| `APP_PASSWORD` | Optional password gate for the whole app. |
+| `APP_PASSWORD` | Optional shared password gate in front of individual account sign-in. |
 
 Example `secrets.toml`:
 

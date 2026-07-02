@@ -50,27 +50,26 @@ st.set_page_config(
 db.init_db()
 
 
-# ── Password gate ─────────────────────────────────────────────────────────────
-def _check_password() -> bool:
+# ── Site gate (optional) + per-account login ───────────────────────────────────
+def _check_site_password() -> bool:
+    """Optional shared password that gates the whole app before individual sign-in."""
     pwd = os.environ.get("APP_PASSWORD", "")
-    if not pwd:
-        return True
-    if st.session_state.get("_authenticated"):
+    if not pwd or st.session_state.get("_site_authenticated"):
         return True
     st.markdown(
         "<div style='max-width:380px;margin:80px auto 0;text-align:center'>"
         "<div style='font-size:3rem;margin-bottom:8px'>🩺</div>"
         "<h2 style='margin-bottom:4px'>UCAT Prep</h2>"
-        "<p style='color:#888;margin-bottom:28px;font-size:14px'>Sign in to start studying</p>"
+        "<p style='color:#888;margin-bottom:28px;font-size:14px'>Enter the site password to continue</p>"
         "</div>",
         unsafe_allow_html=True,
     )
     col = st.columns([1, 2, 1])[1]
     with col:
         pw = st.text_input("Password", type="password", placeholder="Enter password", label_visibility="collapsed")
-        if st.button("Sign in", type="primary", use_container_width=True):
+        if st.button("Continue", type="primary", use_container_width=True):
             if pw == pwd:
-                st.session_state["_authenticated"] = True
+                st.session_state["_site_authenticated"] = True
                 st.rerun()
             else:
                 st.error("Incorrect password — please try again.")
@@ -78,7 +77,59 @@ def _check_password() -> bool:
     return False
 
 
-_check_password()
+def _check_account() -> bool:
+    """Per-account sign-in/sign-up so each student's progress is tracked separately."""
+    if st.session_state.get("user_id"):
+        return True
+    st.markdown(
+        "<div style='max-width:380px;margin:60px auto 0;text-align:center'>"
+        "<div style='font-size:3rem;margin-bottom:8px'>🩺</div>"
+        "<h2 style='margin-bottom:4px'>UCAT Prep</h2>"
+        "<p style='color:#888;margin-bottom:28px;font-size:14px'>Sign in to your account to start studying</p>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    col = st.columns([1, 2, 1])[1]
+    with col:
+        tab_login, tab_signup = st.tabs(["Sign in", "Create account"])
+        with tab_login:
+            with st.form("login_form"):
+                u = st.text_input("Username")
+                p = st.text_input("Password", type="password")
+                if st.form_submit_button("Sign in", type="primary", use_container_width=True):
+                    user = db.verify_user(u, p) if u and p else None
+                    if user:
+                        st.session_state["user_id"] = user["id"]
+                        st.session_state["username"] = user["username"]
+                        st.rerun()
+                    else:
+                        st.error("Incorrect username or password.")
+        with tab_signup:
+            with st.form("signup_form"):
+                u2 = st.text_input("Choose a username")
+                p2 = st.text_input("Choose a password", type="password")
+                p2b = st.text_input("Confirm password", type="password")
+                if st.form_submit_button("Create account", type="primary", use_container_width=True):
+                    if not u2 or not p2:
+                        st.error("Enter a username and password.")
+                    elif p2 != p2b:
+                        st.error("Passwords don't match.")
+                    elif len(p2) < 4:
+                        st.error("Password must be at least 4 characters.")
+                    else:
+                        uid = db.create_user(u2, p2)
+                        if uid:
+                            st.session_state["user_id"] = uid
+                            st.session_state["username"] = u2.strip()
+                            st.rerun()
+                        else:
+                            st.error("That username is already taken.")
+    st.stop()
+    return False
+
+
+_check_site_password()
+_check_account()
 
 # ── Styling ───────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -165,7 +216,7 @@ def est_sjt_band(accuracy_pct):
 
 
 def days_to_exam():
-    iso = db.get_context("exam_date")
+    iso = db.get_context(st.session_state["user_id"], "exam_date")
     if not iso:
         return None, None
     try:
@@ -178,7 +229,12 @@ def days_to_exam():
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## 🩺 UCAT Prep")
-    stats = db.get_overall_stats()
+    st.caption(f"👤 Signed in as **{st.session_state.get('username', '')}**")
+    if st.button("Log out", use_container_width=True):
+        for k in list(st.session_state.keys()):
+            del st.session_state[k]
+        st.rerun()
+    stats = db.get_overall_stats(st.session_state["user_id"])
     acc = (stats["correct"] / stats["attempts"] * 100) if stats["attempts"] else 0
     st.metric("Overall accuracy", f"{acc:.0f}%", help="Across all answered practice questions")
     st.metric("Cards due today", stats["cards_due"])
@@ -201,7 +257,8 @@ with st.sidebar:
 # ════════════════════════════════════════════════════════════════════════════
 def page_dashboard():
     st.title("📊 Dashboard")
-    stats = db.get_overall_stats()
+    uid = st.session_state["user_id"]
+    stats = db.get_overall_stats(uid)
     acc = (stats["correct"] / stats["attempts"] * 100) if stats["attempts"] else 0
 
     dte, exam_d = days_to_exam()
@@ -219,7 +276,7 @@ def page_dashboard():
     c4.metric("Study plan", f"{task_pct:.0f}%", help=f"{stats['tasks_done']} of {stats['tasks_total']} tasks done")
 
     st.markdown("### Estimated scores")
-    rows = db.get_accuracy_by_subject()
+    rows = db.get_accuracy_by_subject(uid)
     df = pd.DataFrame(rows)
     df["code"] = df["subject_id"].map(lambda sid: SUB_BY_ID.get(sid, {}).get("code", ""))
     df["accuracy"] = df.apply(lambda r: (r["correct"] / r["attempts"] * 100) if r["attempts"] else 0, axis=1)
@@ -265,7 +322,7 @@ def page_dashboard():
     colA, colB = st.columns(2)
     with colA:
         st.markdown("### Activity (last 30 days)")
-        ts = pd.DataFrame(db.get_attempts_over_time(30))
+        ts = pd.DataFrame(db.get_attempts_over_time(uid, 30))
         if not ts.empty:
             ts["accuracy"] = ts["correct"] / ts["attempts"] * 100
             fig2 = px.line(ts, x="day", y="attempts", markers=True)
@@ -277,7 +334,7 @@ def page_dashboard():
             st.caption("No activity recorded in the last 30 days.")
     with colB:
         st.markdown("### Question bank coverage")
-        cov = pd.DataFrame(db.get_accuracy_by_subject())
+        cov = pd.DataFrame(db.get_accuracy_by_subject(uid))
         qcounts = []
         for s in SUBJECTS:
             qs = db.get_questions(subject_id=s["id"])
@@ -291,7 +348,7 @@ def page_dashboard():
 
     # Upcoming tasks
     st.markdown("### 🗓️ Upcoming study tasks")
-    tasks = [t for t in db.get_study_tasks() if t["status"] != "Done"][:5]
+    tasks = [t for t in db.get_study_tasks(uid) if t["status"] != "Done"][:5]
     if tasks:
         for t in tasks:
             cols = st.columns([4, 2, 2, 1])
@@ -300,7 +357,7 @@ def page_dashboard():
             cols[1].caption(f"⏱️ {t['duration_min']} min")
             cols[2].caption(f"📅 {t['due_date'] or '—'}")
             if cols[3].button("✓", key=f"dash_done_{t['id']}", help="Mark done"):
-                db.set_task_status(t["id"], "Done")
+                db.set_task_status(uid, t["id"], "Done")
                 st.rerun()
     else:
         st.caption("No open tasks. Add some in **🗓️ Study Scheduler**.")
@@ -370,7 +427,7 @@ def page_practice():
         if st.button("Submit answer", type="primary"):
             is_correct = (choice == q["correct"])
             elapsed = datetime.now().timestamp() - ss.get("quiz_start", datetime.now().timestamp())
-            db.record_attempt(q["id"], q["subject_id"], choice, is_correct, round(elapsed, 1))
+            db.record_attempt(ss["user_id"], q["id"], q["subject_id"], choice, is_correct, round(elapsed, 1))
             ss["quiz_answered"][idx] = choice
             if is_correct:
                 ss["quiz_correct"] += 1
@@ -402,6 +459,7 @@ def page_flashcards():
     st.title("🃏 Flashcards")
     st.caption("Spaced repetition (SM-2). Rate each card honestly — harder cards come back sooner.")
     ss = st.session_state
+    uid = ss["user_id"]
 
     c1, c2 = st.columns([3, 1])
     with c1:
@@ -409,7 +467,7 @@ def page_flashcards():
     with c2:
         due_only = st.toggle("Due only", value=True, key="fc_due")
 
-    cards = db.get_flashcards(subject_id=sid, due_only=due_only)
+    cards = db.get_flashcards(uid, subject_id=sid, due_only=due_only)
     if not cards:
         if due_only:
             st.success("🎉 No cards due right now. Toggle off **Due only** to review ahead, or add cards in ⚙️ Manage.")
@@ -445,7 +503,7 @@ def page_flashcards():
         ratings = [("😖 Again", 0), ("😬 Hard", 3), ("🙂 Good", 4), ("😎 Easy", 5)]
         for col, (lbl, quality) in zip(cols, ratings):
             if col.button(lbl, key=f"fc_rate_{quality}", use_container_width=True):
-                db.review_flashcard(card["id"], quality)
+                db.review_flashcard(uid, card["id"], quality)
                 ss["fc_show_back"] = False
                 ss["fc_pos"] = pos + 1
                 ss["fc_count"] = None  # force refresh of the due list
@@ -458,6 +516,7 @@ def page_flashcards():
 def page_scheduler():
     st.title("🗓️ Study Scheduler")
     ss = st.session_state
+    uid = ss["user_id"]
 
     with st.expander("➕ Add a study task"):
         with st.form("add_task", clear_on_submit=True):
@@ -471,7 +530,7 @@ def page_scheduler():
             notes = st.text_area("Notes", placeholder="Optional")
             if st.form_submit_button("Add task", type="primary"):
                 if title.strip():
-                    db.upsert_study_task({
+                    db.upsert_study_task(uid, {
                         "title": title.strip(),
                         "subject_id": SUB_BY_NAME[sid]["id"] if sid != "—" else None,
                         "task_type": ttype, "due_date": due.isoformat(),
@@ -497,13 +556,13 @@ def page_scheduler():
             day = 0
             for i, (title, sid, ttype) in enumerate(plan_tasks):
                 due = date.today() + timedelta(days=int(i // per_day) % int(weeks))
-                db.upsert_study_task({"title": title, "subject_id": sid, "task_type": ttype,
-                                      "due_date": due.isoformat(), "duration_min": 60})
+                db.upsert_study_task(uid, {"title": title, "subject_id": sid, "task_type": ttype,
+                                           "due_date": due.isoformat(), "duration_min": 60})
             st.success(f"Generated {len(plan_tasks)} tasks.")
             st.rerun()
 
     filt = st.radio("Show", ["All", "Todo", "In Progress", "Done"], horizontal=True)
-    tasks = db.get_study_tasks(status=filt)
+    tasks = db.get_study_tasks(uid, status=filt)
     if not tasks:
         st.info("No tasks. Add one above or generate a plan.")
         return
@@ -516,11 +575,11 @@ def page_scheduler():
         done = t["status"] == "Done"
         if cols[0].checkbox("", value=done, key=f"task_chk_{t['id']}", label_visibility="collapsed"):
             if not done:
-                db.set_task_status(t["id"], "Done")
+                db.set_task_status(uid, t["id"], "Done")
                 st.rerun()
         else:
             if done:
-                db.set_task_status(t["id"], "Todo")
+                db.set_task_status(uid, t["id"], "Todo")
                 st.rerun()
         title_md = f"~~{t['title']}~~" if done else f"**{t['title']}**"
         badge = pill(sub["name"], sub["color"]) if sub else ""
@@ -532,10 +591,10 @@ def page_scheduler():
                                    index=["Todo", "In Progress", "Done"].index(t["status"]),
                                    key=f"task_status_{t['id']}", label_visibility="collapsed")
         if status != t["status"]:
-            db.set_task_status(t["id"], status)
+            db.set_task_status(uid, t["id"], status)
             st.rerun()
         if cols[5].button("🗑️", key=f"task_del_{t['id']}"):
-            db.delete_study_task(t["id"])
+            db.delete_study_task(uid, t["id"])
             st.rerun()
 
 
@@ -569,8 +628,7 @@ def page_content():
                 if t.get("summary"):
                     st.caption(t["summary"])
                 st.markdown(t.get("content") or "_No notes yet._")
-                ncards = len(db.get_flashcards(subject_id=t["subject_id"]))
-                st.caption(f"💬 Ask the AI Tutor about this topic from the 🤖 AI Tutor page.")
+                st.caption("💬 Ask the AI Tutor about this topic from the 🤖 AI Tutor page.")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -591,6 +649,7 @@ SYSTEM_PROMPT = (
 
 def page_tutor():
     st.title("🤖 AI Tutor")
+    uid = st.session_state["user_id"]
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not _HAS_ANTHROPIC or not api_key:
         st.warning(
@@ -603,23 +662,23 @@ def page_tutor():
     cols = st.columns([4, 1])
     cols[0].caption("Ask anything — concepts, practice problems, study strategy.")
     if cols[1].button("🗑️ Clear chat"):
-        db.clear_chat_history()
+        db.clear_chat_history(uid)
         st.rerun()
 
-    history = db.get_chat_history(40)
+    history = db.get_chat_history(uid, 40)
     for m in history:
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
 
     prompt = st.chat_input("e.g. Explain the difference between competitive and noncompetitive inhibition")
     if prompt:
-        db.save_message("user", prompt)
+        db.save_message(uid, "user", prompt)
         with st.chat_message("user"):
             st.markdown(prompt)
         with st.chat_message("assistant"):
             try:
                 client = anthropic.Anthropic(api_key=api_key)
-                msgs = [{"role": m["role"], "content": m["content"]} for m in db.get_chat_history(20)]
+                msgs = [{"role": m["role"], "content": m["content"]} for m in db.get_chat_history(uid, 20)]
                 with st.spinner("Thinking…"):
                     resp = client.messages.create(
                         model="claude-opus-4-8",
@@ -631,7 +690,7 @@ def page_tutor():
             except Exception as e:
                 answer = f"⚠️ Sorry, the tutor hit an error: `{e}`"
             st.markdown(answer)
-            db.save_message("assistant", answer)
+            db.save_message(uid, "assistant", answer)
         st.rerun()
 
 
@@ -640,15 +699,16 @@ def page_tutor():
 # ════════════════════════════════════════════════════════════════════════════
 def page_manage():
     st.title("⚙️ Manage")
+    uid = st.session_state["user_id"]
     tabs = st.tabs(["Exam date", "Questions", "Flashcards", "Topics"])
 
     # Exam date
     with tabs[0]:
-        cur = db.get_context("exam_date")
+        cur = db.get_context(uid, "exam_date")
         cur_d = date.fromisoformat(cur) if cur else date.today() + timedelta(days=90)
         new_d = st.date_input("UCAT exam date", value=cur_d)
         if st.button("Save exam date", type="primary"):
-            db.set_context("exam_date", new_d.isoformat())
+            db.set_context(uid, "exam_date", new_d.isoformat())
             st.success("Saved.")
             st.rerun()
 
@@ -704,12 +764,11 @@ def page_manage():
                 else:
                     st.warning("Fill in both sides.")
         st.divider()
-        cards = db.get_flashcards()
+        cards = db.get_flashcard_bank()
         st.caption(f"{len(cards)} flashcards")
         for fc in cards:
             with st.expander(f"[{SUB_BY_ID.get(fc['subject_id'],{}).get('name','?')}] {fc['front'][:70]}"):
                 st.markdown(f"**Back:** {fc['back']}")
-                st.caption(f"Reps: {fc['reps']} · Due: {fc['due_date'] or '—'} · Ease: {fc['ease']}")
                 if st.button("Delete", key=f"delfc_{fc['id']}"):
                     db.delete_flashcard(fc["id"])
                     st.rerun()
@@ -762,7 +821,7 @@ def _finish_mock(ss, elapsed):
         for i, q in enumerate(ss["mock"]):
             chosen = ss["mock_answers"].get(i)
             if chosen:
-                db.record_attempt(q["id"], q["subject_id"], chosen, chosen == q["correct"], 0)
+                db.record_attempt(ss["user_id"], q["id"], q["subject_id"], chosen, chosen == q["correct"], 0)
         ss["mock_graded"] = True
     ss["mock_elapsed"] = int(elapsed)
     ss["mock_done"] = True

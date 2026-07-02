@@ -9,6 +9,8 @@ it falls back to a local SQLite file so the app runs with zero configuration.
 import os
 import re
 import json
+import hashlib
+import secrets
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
@@ -158,6 +160,13 @@ def _close(conn):
 # ── Schema ─────────────────────────────────────────────────────────────────────
 
 _SQLITE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    salt          TEXT NOT NULL,
+    created_at    TEXT
+);
 CREATE TABLE IF NOT EXISTS subjects (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     code      TEXT NOT NULL UNIQUE,
@@ -190,6 +199,7 @@ CREATE TABLE IF NOT EXISTS questions (
 );
 CREATE TABLE IF NOT EXISTS attempts (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER REFERENCES users(id) ON DELETE CASCADE,
     question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
     subject_id  INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
     chosen      TEXT NOT NULL,
@@ -210,8 +220,20 @@ CREATE TABLE IF NOT EXISTS flashcards (
     last_reviewed TEXT,
     created_at    TEXT
 );
+CREATE TABLE IF NOT EXISTS flashcard_progress (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    flashcard_id  INTEGER NOT NULL REFERENCES flashcards(id) ON DELETE CASCADE,
+    ease          REAL DEFAULT 2.5,
+    interval_days INTEGER DEFAULT 0,
+    reps          INTEGER DEFAULT 0,
+    due_date      TEXT,
+    last_reviewed TEXT,
+    UNIQUE(user_id, flashcard_id)
+);
 CREATE TABLE IF NOT EXISTS study_tasks (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER REFERENCES users(id) ON DELETE CASCADE,
     title        TEXT NOT NULL,
     subject_id   INTEGER REFERENCES subjects(id) ON DELETE SET NULL,
     task_type    TEXT DEFAULT 'Review',
@@ -223,6 +245,7 @@ CREATE TABLE IF NOT EXISTS study_tasks (
 );
 CREATE TABLE IF NOT EXISTS chat_history (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
     role       TEXT NOT NULL CHECK(role IN ('user','assistant')),
     content    TEXT NOT NULL,
     created_at TEXT
@@ -232,9 +255,23 @@ CREATE TABLE IF NOT EXISTS app_context (
     value      TEXT NOT NULL,
     updated_at TEXT
 );
+CREATE TABLE IF NOT EXISTS user_context (
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    key        TEXT NOT NULL,
+    value      TEXT NOT NULL,
+    updated_at TEXT,
+    PRIMARY KEY (user_id, key)
+);
 """
 
 _PG_TABLES = [
+    """CREATE TABLE IF NOT EXISTS users (
+        id            SERIAL PRIMARY KEY,
+        username      TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        salt          TEXT NOT NULL,
+        created_at    TEXT
+    )""",
     """CREATE TABLE IF NOT EXISTS subjects (
         id         SERIAL PRIMARY KEY,
         code       TEXT NOT NULL UNIQUE,
@@ -267,6 +304,7 @@ _PG_TABLES = [
     )""",
     """CREATE TABLE IF NOT EXISTS attempts (
         id          SERIAL PRIMARY KEY,
+        user_id     INTEGER REFERENCES users(id) ON DELETE CASCADE,
         question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
         subject_id  INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
         chosen      TEXT NOT NULL,
@@ -287,8 +325,20 @@ _PG_TABLES = [
         last_reviewed TEXT,
         created_at    TEXT
     )""",
+    """CREATE TABLE IF NOT EXISTS flashcard_progress (
+        id            SERIAL PRIMARY KEY,
+        user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        flashcard_id  INTEGER NOT NULL REFERENCES flashcards(id) ON DELETE CASCADE,
+        ease          DOUBLE PRECISION DEFAULT 2.5,
+        interval_days INTEGER DEFAULT 0,
+        reps          INTEGER DEFAULT 0,
+        due_date      TEXT,
+        last_reviewed TEXT,
+        UNIQUE(user_id, flashcard_id)
+    )""",
     """CREATE TABLE IF NOT EXISTS study_tasks (
         id           SERIAL PRIMARY KEY,
+        user_id      INTEGER REFERENCES users(id) ON DELETE CASCADE,
         title        TEXT NOT NULL,
         subject_id   INTEGER REFERENCES subjects(id) ON DELETE SET NULL,
         task_type    TEXT DEFAULT 'Review',
@@ -300,6 +350,7 @@ _PG_TABLES = [
     )""",
     """CREATE TABLE IF NOT EXISTS chat_history (
         id         SERIAL PRIMARY KEY,
+        user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
         role       TEXT NOT NULL CHECK(role IN ('user','assistant')),
         content    TEXT NOT NULL,
         created_at TEXT
@@ -309,14 +360,49 @@ _PG_TABLES = [
         value      TEXT NOT NULL,
         updated_at TEXT
     )""",
+    """CREATE TABLE IF NOT EXISTS user_context (
+        user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        key        TEXT NOT NULL,
+        value      TEXT NOT NULL,
+        updated_at TEXT,
+        PRIMARY KEY (user_id, key)
+    )""",
 ]
 
 
+def _column_exists(conn, table, column):
+    if _setup():
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM information_schema.columns WHERE table_name=%s AND column_name=%s",
+                (table, column))
+            return cur.fetchone() is not None
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(r["name"] == column for r in rows)
+
+
+def _migrate_user_ids(conn):
+    """Add a user_id column to tables that predate multi-user accounts, so
+    older deployments (e.g. an existing Neon database) pick up per-user data
+    isolation without losing any existing rows. Pre-existing rows are left
+    with user_id = NULL and simply won't show up for any account — they were
+    recorded before accounts existed, so there's no user to attribute them to."""
+    for table in ("attempts", "study_tasks", "chat_history"):
+        if _column_exists(conn, table, "user_id"):
+            continue
+        if _setup():
+            with conn.cursor() as cur:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE")
+        else:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN user_id INTEGER REFERENCES users(id)")
+    _commit(conn)
+
+
 def init_db():
-    """Create tables, seed starter content on first run, and backfill any
-    newer seed content into an already-populated database. The work runs once
-    per process — Streamlit reruns this script on every interaction, so the
-    guard keeps each rerun cheap."""
+    """Create tables, migrate older schemas, seed starter content on first
+    run, and backfill any newer seed content into an already-populated
+    database. The work runs once per process — Streamlit reruns this script
+    on every interaction, so the guard keeps each rerun cheap."""
     global _BOOTSTRAPPED
     if _BOOTSTRAPPED:
         return
@@ -329,6 +415,7 @@ def init_db():
         else:
             conn.executescript(_SQLITE_SCHEMA)
         _commit(conn)
+        _migrate_user_ids(conn)
     finally:
         _close(conn)
     seed_content()
@@ -350,6 +437,45 @@ def get_subject_map():
     """Return {id: row} and {code: row} for quick lookups."""
     subs = get_subjects()
     return {s["id"]: s for s in subs}, {s["code"]: s for s in subs}
+
+
+# ── Users / accounts ─────────────────────────────────────────────────────────
+
+def _hash_password(password: str, salt: str) -> str:
+    return hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100_000).hex()
+
+
+def create_user(username: str, password: str):
+    """Create a new account. Returns the new user id, or None if the username is taken."""
+    username = username.strip()
+    ph = _ph()
+    conn = get_conn()
+    try:
+        if _q1(conn, f"SELECT id FROM users WHERE username = {ph}", (username,)):
+            return None
+        salt = secrets.token_hex(16)
+        uid = _run(conn, _n("""
+            INSERT INTO users (username, password_hash, salt, created_at)
+            VALUES (:u, :h, :s, :ca)
+        """), {"u": username, "h": _hash_password(password, salt), "s": salt,
+               "ca": datetime.now().isoformat()})
+        _commit(conn)
+        return uid
+    finally:
+        _close(conn)
+
+
+def verify_user(username: str, password: str):
+    """Return the user row if the username/password match, else None."""
+    ph = _ph()
+    conn = get_conn()
+    try:
+        row = _q1(conn, f"SELECT * FROM users WHERE username = {ph}", (username.strip(),))
+        if row and _hash_password(password, row["salt"]) == row["password_hash"]:
+            return row
+        return None
+    finally:
+        _close(conn)
 
 
 # ── Topics ─────────────────────────────────────────────────────────────────────
@@ -481,13 +607,13 @@ def delete_question(qid):
         _close(conn)
 
 
-def record_attempt(question_id, subject_id, chosen, is_correct, seconds=0):
+def record_attempt(user_id, question_id, subject_id, chosen, is_correct, seconds=0):
     conn = get_conn()
     try:
         _run(conn, _n("""
-            INSERT INTO attempts (question_id, subject_id, chosen, is_correct, seconds, created_at)
-            VALUES (:question_id, :subject_id, :chosen, :is_correct, :seconds, :created_at)
-        """), {"question_id": question_id, "subject_id": subject_id, "chosen": chosen,
+            INSERT INTO attempts (user_id, question_id, subject_id, chosen, is_correct, seconds, created_at)
+            VALUES (:user_id, :question_id, :subject_id, :chosen, :is_correct, :seconds, :created_at)
+        """), {"user_id": user_id, "question_id": question_id, "subject_id": subject_id, "chosen": chosen,
                "is_correct": 1 if is_correct else 0, "seconds": seconds,
                "created_at": datetime.now().isoformat()})
         _commit(conn)
@@ -497,20 +623,42 @@ def record_attempt(question_id, subject_id, chosen, is_correct, seconds=0):
 
 # ── Flashcards (SM-2 lite spaced repetition) ───────────────────────────────────
 
-def get_flashcards(subject_id=None, due_only=False):
+def get_flashcard_bank():
+    """List all flashcards (content only, no per-user progress) — for the Manage page."""
+    conn = get_conn()
+    try:
+        return _q(conn, """
+            SELECT f.id, f.subject_id, f.topic_id, f.front, f.back, f.created_at,
+                   s.name AS subject_name, s.color, t.name AS topic_name
+            FROM flashcards f JOIN subjects s ON f.subject_id = s.id
+            LEFT JOIN topics t ON f.topic_id = t.id
+            ORDER BY s.sort_order, f.id
+        """)
+    finally:
+        _close(conn)
+
+
+def get_flashcards(user_id, subject_id=None, due_only=False):
+    """List flashcards along with this user's own spaced-repetition progress."""
     ph = _ph()
-    sql = """SELECT f.*, s.name AS subject_name, s.color, t.name AS topic_name
-             FROM flashcards f JOIN subjects s ON f.subject_id = s.id
-             LEFT JOIN topics t ON f.topic_id = t.id WHERE 1=1"""
-    params: list = []
+    sql = f"""SELECT f.id, f.subject_id, f.topic_id, f.front, f.back, f.created_at,
+                     s.name AS subject_name, s.color, t.name AS topic_name,
+                     COALESCE(p.ease, 2.5) AS ease, COALESCE(p.interval_days, 0) AS interval_days,
+                     COALESCE(p.reps, 0) AS reps, p.due_date AS due_date, p.last_reviewed AS last_reviewed
+              FROM flashcards f
+              JOIN subjects s ON f.subject_id = s.id
+              LEFT JOIN topics t ON f.topic_id = t.id
+              LEFT JOIN flashcard_progress p ON p.flashcard_id = f.id AND p.user_id = {ph}
+              WHERE 1=1"""
+    params: list = [user_id]
     if subject_id:
         sql += f" AND f.subject_id = {ph}"
         params.append(subject_id)
     if due_only:
         today = date.today().isoformat()
-        sql += f" AND (f.due_date IS NULL OR f.due_date <= {ph})"
+        sql += f" AND (p.due_date IS NULL OR p.due_date <= {ph})"
         params.append(today)
-    sql += " ORDER BY f.due_date NULLS FIRST, f.id" if _setup() else " ORDER BY f.due_date IS NOT NULL, f.due_date, f.id"
+    sql += " ORDER BY p.due_date NULLS FIRST, f.id" if _setup() else " ORDER BY p.due_date IS NOT NULL, p.due_date, f.id"
     conn = get_conn()
     try:
         return _q(conn, sql, tuple(params))
@@ -552,17 +700,16 @@ def delete_flashcard(fid):
         _close(conn)
 
 
-def review_flashcard(fid, quality: int):
-    """Update a card with an SM-2-lite schedule. quality 0=Again,3=Hard,4=Good,5=Easy."""
+def review_flashcard(user_id, fid, quality: int):
+    """Update this user's schedule for a card with SM-2-lite. quality 0=Again,3=Hard,4=Good,5=Easy."""
     ph = _ph()
     conn = get_conn()
     try:
-        card = _q1(conn, f"SELECT * FROM flashcards WHERE id = {ph}", (fid,))
-        if not card:
-            return
-        ease = card.get("ease") or 2.5
-        reps = card.get("reps") or 0
-        interval = card.get("interval_days") or 0
+        prog = _q1(conn, f"SELECT * FROM flashcard_progress WHERE user_id = {ph} AND flashcard_id = {ph}",
+                   (user_id, fid)) or {}
+        ease = prog.get("ease") or 2.5
+        reps = prog.get("reps") or 0
+        interval = prog.get("interval_days") or 0
         if quality < 3:
             reps = 0
             interval = 1
@@ -577,11 +724,20 @@ def review_flashcard(fid, quality: int):
             ease = max(1.3, ease + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02)))
         interval = max(1, int(interval))
         due = (date.today() + timedelta(days=interval)).isoformat()
-        _run(conn, _n("""
-            UPDATE flashcards SET ease=:ease, reps=:reps, interval_days=:interval,
-                due_date=:due, last_reviewed=:now WHERE id=:id
-        """), {"ease": round(ease, 2), "reps": reps, "interval": interval,
-               "due": due, "now": datetime.now().isoformat(), "id": fid})
+        params = {"user_id": user_id, "flashcard_id": fid, "ease": round(ease, 2), "reps": reps,
+                  "interval": interval, "due": due, "now": datetime.now().isoformat()}
+        upsert_sql = """
+            INSERT INTO flashcard_progress (user_id, flashcard_id, ease, interval_days, reps, due_date, last_reviewed)
+            VALUES (:user_id, :flashcard_id, :ease, :interval, :reps, :due, :now)
+            ON CONFLICT (user_id, flashcard_id) DO UPDATE SET
+                ease = excluded.ease, interval_days = excluded.interval_days,
+                reps = excluded.reps, due_date = excluded.due_date, last_reviewed = excluded.last_reviewed
+        """
+        if _setup():
+            with conn.cursor() as cur:
+                cur.execute(_n(upsert_sql), params)
+        else:
+            conn.execute(upsert_sql, params)
         _commit(conn)
     finally:
         _close(conn)
@@ -589,11 +745,12 @@ def review_flashcard(fid, quality: int):
 
 # ── Study tasks (scheduler) ────────────────────────────────────────────────────
 
-def get_study_tasks(status=None):
+def get_study_tasks(user_id, status=None):
     ph = _ph()
-    sql = """SELECT st.*, s.name AS subject_name, s.color
-             FROM study_tasks st LEFT JOIN subjects s ON st.subject_id = s.id WHERE 1=1"""
-    params: list = []
+    sql = f"""SELECT st.*, s.name AS subject_name, s.color
+             FROM study_tasks st LEFT JOIN subjects s ON st.subject_id = s.id
+             WHERE st.user_id = {ph}"""
+    params: list = [user_id]
     if status and status != "All":
         sql += f" AND st.status = {ph}"
         params.append(status)
@@ -605,9 +762,10 @@ def get_study_tasks(status=None):
         _close(conn)
 
 
-def upsert_study_task(data: dict):
+def upsert_study_task(user_id, data: dict):
     now = datetime.now().isoformat()
     data = dict(data)
+    data["user_id"] = user_id
     data.setdefault("subject_id", None)
     data.setdefault("task_type", "Review")
     data.setdefault("duration_min", 60)
@@ -618,13 +776,14 @@ def upsert_study_task(data: dict):
         if data.get("id"):
             _run(conn, _n("""
                 UPDATE study_tasks SET title=:title, subject_id=:subject_id, task_type=:task_type,
-                    due_date=:due_date, duration_min=:duration_min, status=:status, notes=:notes WHERE id=:id
+                    due_date=:due_date, duration_min=:duration_min, status=:status, notes=:notes
+                WHERE id=:id AND user_id=:user_id
             """), data)
         else:
             data["created_at"] = now
             data["id"] = _run(conn, _n("""
-                INSERT INTO study_tasks (title, subject_id, task_type, due_date, duration_min, status, notes, created_at)
-                VALUES (:title, :subject_id, :task_type, :due_date, :duration_min, :status, :notes, :created_at)
+                INSERT INTO study_tasks (user_id, title, subject_id, task_type, due_date, duration_min, status, notes, created_at)
+                VALUES (:user_id, :title, :subject_id, :task_type, :due_date, :duration_min, :status, :notes, :created_at)
             """), data)
         _commit(conn)
         return data["id"]
@@ -632,21 +791,22 @@ def upsert_study_task(data: dict):
         _close(conn)
 
 
-def set_task_status(task_id, status):
+def set_task_status(user_id, task_id, status):
     ph = _ph()
     conn = get_conn()
     try:
-        _run(conn, f"UPDATE study_tasks SET status = {ph} WHERE id = {ph}", (status, task_id))
+        _run(conn, f"UPDATE study_tasks SET status = {ph} WHERE id = {ph} AND user_id = {ph}",
+             (status, task_id, user_id))
         _commit(conn)
     finally:
         _close(conn)
 
 
-def delete_study_task(task_id):
+def delete_study_task(user_id, task_id):
     ph = _ph()
     conn = get_conn()
     try:
-        _run(conn, f"DELETE FROM study_tasks WHERE id = {ph}", (task_id,))
+        _run(conn, f"DELETE FROM study_tasks WHERE id = {ph} AND user_id = {ph}", (task_id, user_id))
         _commit(conn)
     finally:
         _close(conn)
@@ -654,61 +814,63 @@ def delete_study_task(task_id):
 
 # ── Chat history (AI tutor) ────────────────────────────────────────────────────
 
-def save_message(role: str, content: str):
+def save_message(user_id, role: str, content: str):
     ph = _ph()
     conn = get_conn()
     try:
-        _run(conn, f"INSERT INTO chat_history (role, content, created_at) VALUES ({ph}, {ph}, {ph})",
-             (role, content, datetime.now().isoformat()))
+        _run(conn, f"INSERT INTO chat_history (user_id, role, content, created_at) VALUES ({ph}, {ph}, {ph}, {ph})",
+             (user_id, role, content, datetime.now().isoformat()))
         _commit(conn)
     finally:
         _close(conn)
 
 
-def get_chat_history(limit=50):
+def get_chat_history(user_id, limit=50):
     ph = _ph()
     conn = get_conn()
     try:
-        rows = _q(conn, f"SELECT role, content FROM chat_history ORDER BY id DESC LIMIT {ph}", (limit,))
+        rows = _q(conn, f"SELECT role, content FROM chat_history WHERE user_id = {ph} ORDER BY id DESC LIMIT {ph}",
+                  (user_id, limit))
         return list(reversed(rows))
     finally:
         _close(conn)
 
 
-def clear_chat_history():
+def clear_chat_history(user_id):
+    ph = _ph()
     conn = get_conn()
     try:
-        _run(conn, "DELETE FROM chat_history")
+        _run(conn, f"DELETE FROM chat_history WHERE user_id = {ph}", (user_id,))
         _commit(conn)
     finally:
         _close(conn)
 
 
-# ── App context (exam date etc.) ───────────────────────────────────────────────
+# ── Per-user context (exam date etc.) ───────────────────────────────────────────
 
-def set_context(key: str, value: str):
+def set_context(user_id, key: str, value: str):
     now = datetime.now().isoformat()
     conn = get_conn()
     try:
         if _setup():
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO app_context (key, value, updated_at) VALUES (%s, %s, %s) "
-                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
-                    (key, value, now))
+                    "INSERT INTO user_context (user_id, key, value, updated_at) VALUES (%s, %s, %s, %s) "
+                    "ON CONFLICT (user_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
+                    (user_id, key, value, now))
         else:
-            conn.execute("INSERT OR REPLACE INTO app_context (key, value, updated_at) VALUES (?, ?, ?)",
-                         (key, value, now))
+            conn.execute("INSERT OR REPLACE INTO user_context (user_id, key, value, updated_at) VALUES (?, ?, ?, ?)",
+                         (user_id, key, value, now))
         _commit(conn)
     finally:
         _close(conn)
 
 
-def get_context(key: str, default=None):
+def get_context(user_id, key: str, default=None):
     ph = _ph()
     conn = get_conn()
     try:
-        row = _q1(conn, f"SELECT value FROM app_context WHERE key = {ph}", (key,))
+        row = _q1(conn, f"SELECT value FROM user_context WHERE user_id = {ph} AND key = {ph}", (user_id, key))
         return row["value"] if row else default
     finally:
         _close(conn)
@@ -716,23 +878,24 @@ def get_context(key: str, default=None):
 
 # ── Analytics ──────────────────────────────────────────────────────────────────
 
-def get_accuracy_by_subject():
+def get_accuracy_by_subject(user_id):
+    ph = _ph()
     conn = get_conn()
     try:
-        return _q(conn, """
+        return _q(conn, f"""
             SELECT s.id AS subject_id, s.name AS subject_name, s.color,
                    COUNT(a.id) AS attempts,
                    SUM(a.is_correct) AS correct,
                    AVG(a.seconds) AS avg_seconds
-            FROM subjects s LEFT JOIN attempts a ON a.subject_id = s.id
+            FROM subjects s LEFT JOIN attempts a ON a.subject_id = s.id AND a.user_id = {ph}
             GROUP BY s.id, s.name, s.color
             ORDER BY s.sort_order, s.name
-        """)
+        """, (user_id,))
     finally:
         _close(conn)
 
 
-def get_attempts_over_time(days=30):
+def get_attempts_over_time(user_id, days=30):
     ph = _ph()
     start = (date.today() - timedelta(days=days)).isoformat()
     conn = get_conn()
@@ -741,25 +904,32 @@ def get_attempts_over_time(days=30):
             SELECT substr(created_at, 1, 10) AS day,
                    COUNT(*) AS attempts,
                    SUM(is_correct) AS correct
-            FROM attempts WHERE created_at >= {ph}
+            FROM attempts WHERE user_id = {ph} AND created_at >= {ph}
             GROUP BY substr(created_at, 1, 10)
             ORDER BY day
-        """, (start,))
+        """, (user_id, start))
     finally:
         _close(conn)
 
 
-def get_overall_stats():
+def get_overall_stats(user_id):
+    ph = _ph()
     conn = get_conn()
     try:
-        att = _q1(conn, "SELECT COUNT(*) AS n, SUM(is_correct) AS correct FROM attempts") or {}
+        att = _q1(conn, f"SELECT COUNT(*) AS n, SUM(is_correct) AS correct FROM attempts WHERE user_id = {ph}",
+                  (user_id,)) or {}
         cards = _q1(conn, "SELECT COUNT(*) AS n FROM flashcards") or {}
         today = date.today().isoformat()
-        ph = _ph()
-        due = _q1(conn, f"SELECT COUNT(*) AS n FROM flashcards WHERE due_date IS NULL OR due_date <= {ph}", (today,)) or {}
-        mastered = _q1(conn, "SELECT COUNT(*) AS n FROM flashcards WHERE reps >= 3") or {}
-        tasks_done = _q1(conn, "SELECT COUNT(*) AS n FROM study_tasks WHERE status = 'Done'") or {}
-        tasks_total = _q1(conn, "SELECT COUNT(*) AS n FROM study_tasks") or {}
+        due = _q1(conn, f"""
+            SELECT COUNT(*) AS n FROM flashcards f
+            LEFT JOIN flashcard_progress p ON p.flashcard_id = f.id AND p.user_id = {ph}
+            WHERE p.due_date IS NULL OR p.due_date <= {ph}
+        """, (user_id, today)) or {}
+        mastered = _q1(conn, f"SELECT COUNT(*) AS n FROM flashcard_progress WHERE user_id = {ph} AND reps >= 3",
+                       (user_id,)) or {}
+        tasks_done = _q1(conn, f"SELECT COUNT(*) AS n FROM study_tasks WHERE status = 'Done' AND user_id = {ph}",
+                         (user_id,)) or {}
+        tasks_total = _q1(conn, f"SELECT COUNT(*) AS n FROM study_tasks WHERE user_id = {ph}", (user_id,)) or {}
         qs = _q1(conn, "SELECT COUNT(*) AS n FROM questions") or {}
         return {
             "attempts": att.get("n") or 0,
