@@ -93,6 +93,21 @@ def cached_daily_pace(uid, days):
 
 
 @st.cache_data(ttl=60, show_spinner=False)
+def cached_leaderboard_questions():
+    return db.get_leaderboard_questions_answered()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def cached_leaderboard_pace(min_attempts):
+    return db.get_leaderboard_pace(min_attempts=min_attempts)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def cached_leaderboard_mock_scores():
+    return db.get_leaderboard_mock_scores()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
 def cached_study_tasks(uid, status=None):
     return db.get_study_tasks(uid, status=status)
 
@@ -116,6 +131,9 @@ def _invalidate_stats_cache():
     cached_accuracy_by_subject.clear()
     cached_attempts_over_time.clear()
     cached_daily_pace.clear()
+    cached_leaderboard_questions.clear()
+    cached_leaderboard_pace.clear()
+    cached_leaderboard_mock_scores.clear()
 
 
 def _invalidate_tasks_cache():
@@ -420,8 +438,8 @@ with st.sidebar:
     st.markdown("---")
     page = st.radio(
         "Navigate",
-        ["📊 Dashboard", "🧭 UCAT Guide", "📝 Practice Questions", "⏱️ Mock Exam", "🃏 Flashcards",
-         "🗓️ Study Scheduler", "📚 Strategy & Skills", "🤖 AI Tutor", "⚙️ Manage"],
+        ["📊 Dashboard", "🧭 UCAT Guide", "📝 Practice Questions", "⏱️ Mock Exam", "🏆 Leaderboard",
+         "🃏 Flashcards", "🗓️ Study Scheduler", "📚 Strategy & Skills", "🤖 AI Tutor", "⚙️ Manage"],
         label_visibility="collapsed",
     )
     st.markdown("---")
@@ -1599,6 +1617,17 @@ def _finish_mock(ss, elapsed):
             if chosen:
                 db.record_attempt(ss["user_id"], q["id"], q["subject_id"], chosen, chosen == q["correct"],
                                    times.get(i, 0))
+
+        rows = _mock_results(ss)
+        total_q = sum(r["total"] for r in rows.values())
+        total_correct = sum(r["correct"] for r in rows.values())
+        cog_total = None
+        if any(code in COGNITIVE_CODES for code in rows):
+            cog_total = sum(est_scaled_score(r["correct"] / r["total"] * 100 if r["total"] else 0)
+                             for code, r in rows.items() if code in COGNITIVE_CODES)
+        if total_q:
+            db.record_mock_result(ss["user_id"], total_correct, total_q, cog_total)
+
         _invalidate_stats_cache()
         ss["mock_graded"] = True
     ss["mock_elapsed"] = int(elapsed)
@@ -1783,12 +1812,61 @@ def page_mock():
         st.rerun()
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# LEADERBOARD
+# ════════════════════════════════════════════════════════════════════════════
+def _render_leaderboard(rows, uid, value_fmt, top_n=10):
+    if not rows:
+        st.info("No qualifying data yet — be the first to set a benchmark.")
+        return
+
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+    top = rows[:top_n]
+    df = pd.DataFrame([
+        {"Rank": medals.get(i, str(i)), "Student": r["username"] + (" (you)" if r["user_id"] == uid else ""),
+         "Value": value_fmt(r["value"])}
+        for i, r in enumerate(top, start=1)
+    ])
+    st.dataframe(df, hide_index=True, width="stretch")
+
+    if not any(r["user_id"] == uid for r in top):
+        for i, r in enumerate(rows, start=1):
+            if r["user_id"] == uid:
+                st.caption(f"Your rank: **#{i}** of {len(rows)} — {value_fmt(r['value'])}")
+                break
+        else:
+            st.caption("You don't have qualifying data yet — keep practising to appear on this board.")
+
+
+def page_leaderboard():
+    st.title("🏆 Leaderboard")
+    st.caption("See how your prep compares. Rankings are shared across every signed-in student.")
+    uid = st.session_state["user_id"]
+
+    tab1, tab2, tab3 = st.tabs(["📝 Most Questions Answered", "⏱️ Fastest Pace", "🎯 Best Mock Score"])
+
+    with tab1:
+        st.caption("Total practice + mock questions answered, all-time.")
+        _render_leaderboard(cached_leaderboard_questions(), uid, lambda v: f"{int(v)}")
+
+    with tab2:
+        threshold = st.select_slider("Minimum timed questions to qualify", options=[20, 50, 100, 200], value=50)
+        st.caption(f"Lowest average seconds per question, among students with at least {threshold} timed answers "
+                   "— so a fast time from just a few lucky questions can't top the board.")
+        _render_leaderboard(cached_leaderboard_pace(threshold), uid, lambda v: f"{v:.1f}s")
+
+    with tab3:
+        st.caption("Best indicative cognitive total (VR + DM + QR, out of 2700) from a single completed Mock Exam.")
+        _render_leaderboard(cached_leaderboard_mock_scores(), uid, lambda v: f"{int(round(v))} / 2700")
+
+
 # ── Router ────────────────────────────────────────────────────────────────────
 PAGES = {
     "📊 Dashboard": page_dashboard,
     "🧭 UCAT Guide": page_guide,
     "📝 Practice Questions": page_practice,
     "⏱️ Mock Exam": page_mock,
+    "🏆 Leaderboard": page_leaderboard,
     "🃏 Flashcards": page_flashcards,
     "🗓️ Study Scheduler": page_scheduler,
     "📚 Strategy & Skills": page_content,
