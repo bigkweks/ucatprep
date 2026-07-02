@@ -88,6 +88,11 @@ def cached_attempts_over_time(uid, days):
 
 
 @st.cache_data(ttl=60, show_spinner=False)
+def cached_daily_pace(uid, days):
+    return db.get_daily_pace(uid, days)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
 def cached_study_tasks(uid, status=None):
     return db.get_study_tasks(uid, status=status)
 
@@ -110,6 +115,7 @@ def _invalidate_stats_cache():
     cached_overall_stats.clear()
     cached_accuracy_by_subject.clear()
     cached_attempts_over_time.clear()
+    cached_daily_pace.clear()
 
 
 def _invalidate_tasks_cache():
@@ -496,7 +502,7 @@ def page_dashboard():
         if not ts.empty:
             ts["accuracy"] = ts["correct"] / ts["attempts"] * 100
             fig2 = px.line(ts, x="day", y="attempts", markers=True)
-            fig2.update_traces(line_color="#2E86C1")
+            fig2.update_traces(line_color="#0C6B58")
             fig2.update_layout(height=280, margin=dict(t=10, b=10), plot_bgcolor="white",
                                yaxis_title="Questions", xaxis_title="")
             st.plotly_chart(fig2, width="stretch")
@@ -510,6 +516,42 @@ def page_dashboard():
                                     marker_colors=qc["color"].tolist(), hole=0.45))
             fig3.update_layout(height=280, margin=dict(t=10, b=10), showlegend=True)
             st.plotly_chart(fig3, width="stretch")
+
+    st.markdown("### ⏱️ Pace — average time per question")
+    pace_rows = cached_daily_pace(uid, 30)
+    if pace_rows:
+        pace_df = pd.DataFrame(pace_rows)
+        daily = pace_df.groupby("day").agg(attempts=("attempts", "sum"),
+                                            total_seconds=("total_seconds", "sum")).reset_index()
+        daily["avg_seconds"] = daily["total_seconds"] / daily["attempts"]
+        # Blended target: each day's mix of subtests weighted by official per-question pacing.
+        pace_df["target_seconds"] = pace_df["code"].map(seconds_per_question) * pace_df["attempts"]
+        target_by_day = pace_df.groupby("day").agg(target_total=("target_seconds", "sum"),
+                                                     attempts=("attempts", "sum")).reset_index()
+        daily["target_seconds"] = target_by_day["target_total"] / target_by_day["attempts"]
+
+        fig4 = go.Figure()
+        fig4.add_trace(go.Scatter(x=daily["day"], y=daily["avg_seconds"], mode="lines+markers",
+                                   name="Your average", line=dict(color="#0C6B58", width=3)))
+        fig4.add_trace(go.Scatter(x=daily["day"], y=daily["target_seconds"], mode="lines",
+                                   name="Target (official pacing)", line=dict(color="#B5762A", width=2, dash="dash")))
+        fig4.update_layout(height=300, margin=dict(t=10, b=10), plot_bgcolor="white",
+                           yaxis_title="Seconds per question", xaxis_title="",
+                           legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
+        st.plotly_chart(fig4, width="stretch")
+
+        latest = daily.iloc[-1]
+        gap = latest["avg_seconds"] - latest["target_seconds"]
+        if gap > 0:
+            st.caption(f"💡 Most recently you averaged **{latest['avg_seconds']:.1f}s/question**, "
+                       f"**{gap:.1f}s slower** than the blended target of {latest['target_seconds']:.1f}s. "
+                       "Speed comes with repetition — keep drilling at pace.")
+        else:
+            st.caption(f"✅ Most recently you averaged **{latest['avg_seconds']:.1f}s/question**, "
+                       f"at or ahead of the blended target of {latest['target_seconds']:.1f}s. Keep it up.")
+    else:
+        st.caption("No timed attempts yet. Answer questions in **📝 Practice Questions** or **⏱️ Mock Exam** "
+                   "to start tracking your pace.")
 
     # Upcoming tasks
     st.markdown("### 🗓️ Upcoming study tasks")
@@ -555,6 +597,7 @@ def page_practice():
                 ss["quiz_idx"] = 0
                 ss["quiz_answered"] = {}
                 ss["quiz_correct"] = 0
+                ss["quiz_times"] = {}
                 ss["quiz_start"] = datetime.now().timestamp()
                 st.rerun()
 
@@ -569,10 +612,19 @@ def page_practice():
     if idx >= len(quiz):
         score = ss["quiz_correct"]
         total = len(quiz)
+        times = ss.get("quiz_times", {})
         st.success(f"## ✅ Quiz complete — {score}/{total} correct ({score/total*100:.0f}%)")
         st.progress(score / total)
+        if times:
+            avg_secs = sum(times.values()) / len(times)
+            target = sum(seconds_per_question(SUB_BY_ID[quiz[i]["subject_id"]]["code"]) for i in times) / len(times)
+            c1, c2 = st.columns(2)
+            c1.metric("Average time per question", f"{avg_secs:.1f}s",
+                       delta=f"{avg_secs - target:+.1f}s vs target", delta_color="inverse")
+            c2.metric("Target for this mix", f"{target:.1f}s",
+                       help="Official UCAT per-question pacing, blended across the subtests in this quiz")
         if st.button("🔄 New quiz"):
-            for k in ("quiz", "quiz_idx", "quiz_answered", "quiz_correct"):
+            for k in ("quiz", "quiz_idx", "quiz_answered", "quiz_correct", "quiz_times"):
                 ss.pop(k, None)
             st.rerun()
         return
@@ -593,9 +645,11 @@ def page_practice():
         if st.button("Submit answer", type="primary"):
             is_correct = (choice == q["correct"])
             elapsed = datetime.now().timestamp() - ss.get("quiz_start", datetime.now().timestamp())
-            db.record_attempt(ss["user_id"], q["id"], q["subject_id"], choice, is_correct, round(elapsed, 1))
+            elapsed = round(elapsed, 1)
+            db.record_attempt(ss["user_id"], q["id"], q["subject_id"], choice, is_correct, elapsed)
             _invalidate_stats_cache()
             ss["quiz_answered"][idx] = choice
+            ss["quiz_times"][idx] = elapsed
             if is_correct:
                 ss["quiz_correct"] += 1
             ss["quiz_start"] = datetime.now().timestamp()
@@ -612,6 +666,10 @@ def page_practice():
             st.success("Correct!")
         else:
             st.error(f"Not quite — the answer is **{q['correct']}**.")
+        taken = ss["quiz_times"].get(idx)
+        if taken is not None:
+            target = seconds_per_question(SUB_BY_ID[q["subject_id"]]["code"])
+            st.caption(f"⏱️ Answered in **{taken:.1f}s** · target for {sub['name'] if sub else 'this subtest'}: ~{target:.0f}s")
         if q.get("explanation"):
             st.info(f"**Explanation.** {q['explanation']}")
         if st.button("Next ▶️", type="primary"):
@@ -1535,10 +1593,12 @@ def _build_mock(subtest_ids):
 def _finish_mock(ss, elapsed):
     """Record every answered question to analytics once, then flip to the results screen."""
     if not ss.get("mock_graded"):
+        times = ss.get("mock_times", {})
         for i, q in enumerate(ss["mock"]):
             chosen = ss["mock_answers"].get(i)
             if chosen:
-                db.record_attempt(ss["user_id"], q["id"], q["subject_id"], chosen, chosen == q["correct"], 0)
+                db.record_attempt(ss["user_id"], q["id"], q["subject_id"], chosen, chosen == q["correct"],
+                                   times.get(i, 0))
         _invalidate_stats_cache()
         ss["mock_graded"] = True
     ss["mock_elapsed"] = int(elapsed)
@@ -1573,6 +1633,18 @@ def page_mock():
         st.success(f"## ✅ Mock complete — {total_correct}/{total_q} correct "
                    f"({(total_correct/total_q*100) if total_q else 0:.0f}%)")
         st.caption(f"⏱️ Time used: {fmt_mmss(used)} of {fmt_mmss(ss.get('mock_budget', 0))}")
+
+        answered_times = {i: t for i, t in ss.get("mock_times", {}).items()
+                           if ss["mock_answers"].get(i) and t}
+        if answered_times:
+            avg_secs = sum(answered_times.values()) / len(answered_times)
+            target = sum(seconds_per_question(SUB_BY_ID[ss["mock"][i]["subject_id"]]["code"])
+                         for i in answered_times) / len(answered_times)
+            c1, c2 = st.columns(2)
+            c1.metric("Average time per question", f"{avg_secs:.1f}s",
+                       delta=f"{avg_secs - target:+.1f}s vs target", delta_color="inverse")
+            c2.metric("Target for this mix", f"{target:.1f}s",
+                       help="Official UCAT per-question pacing, blended across the subtests in this mock")
 
         cols = st.columns(len(rows) or 1)
         cog_total, cog_any = 0, False
@@ -1632,6 +1704,8 @@ def page_mock():
             ss["mock"] = quiz
             ss["mock_idx"] = 0
             ss["mock_answers"] = {}
+            ss["mock_times"] = {}
+            ss["mock_q_start"] = {}
             ss["mock_budget"] = budget
             ss["mock_start"] = datetime.now().timestamp()
             st.rerun()
@@ -1653,12 +1727,14 @@ def page_mock():
         _finish_mock(ss, elapsed)
         st.rerun()
 
+    ss.setdefault("mock_q_start", {}).setdefault(idx, datetime.now().timestamp())
+
     # Header: live countdown (cosmetic client-side ticker) + progress
     top = st.columns([2, 3])
     with top[0]:
         components.html(f"""
             <div id='ucat-timer' style="font:600 26px/1.2 -apple-system,Segoe UI,Roboto,sans-serif;
-                 color:{'#c0392b' if remaining < 60 else '#11324D'}"></div>
+                 color:{'#C24A38' if remaining < 60 else '#16211F'}"></div>
             <script>
               let r = {int(remaining)};
               const el = document.getElementById('ucat-timer');
@@ -1696,11 +1772,13 @@ def page_mock():
         st.rerun()
     if nav[2].button("Save & next ▶", type="primary"):
         ss["mock_answers"][idx] = choice
+        ss["mock_times"][idx] = round(datetime.now().timestamp() - ss["mock_q_start"].get(idx, datetime.now().timestamp()), 1)
         ss["mock_idx"] += 1
         st.rerun()
     if nav[3].button("🏁 Finish & grade"):
         if choice:
             ss["mock_answers"][idx] = choice
+            ss["mock_times"][idx] = round(datetime.now().timestamp() - ss["mock_q_start"].get(idx, datetime.now().timestamp()), 1)
         _finish_mock(ss, elapsed)
         st.rerun()
 
