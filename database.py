@@ -569,6 +569,21 @@ def get_questions(subject_id=None, topic_id=None, difficulty=None, limit=None):
         _close(conn)
 
 
+def get_question_counts_by_subject():
+    """Question bank size per subject in a single grouped query, instead of
+    fetching every question for each subject separately just to count them."""
+    conn = get_conn()
+    try:
+        return _q(conn, """
+            SELECT s.id AS subject_id, s.name AS subject_name, s.color, COUNT(q.id) AS questions
+            FROM subjects s LEFT JOIN questions q ON q.subject_id = s.id
+            GROUP BY s.id, s.name, s.color
+            ORDER BY s.sort_order, s.name
+        """)
+    finally:
+        _close(conn)
+
+
 def upsert_question(data: dict):
     now = datetime.now().isoformat()
     data = dict(data)

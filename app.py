@@ -39,6 +39,89 @@ except ImportError:
 
 import database as db
 
+# ── Cached data access ───────────────────────────────────────────────────────
+# Every repeated database read goes through one of these st.cache_data wrappers,
+# so identical reads within a rerun (e.g. two widgets needing the same data) and
+# across reruns (e.g. navigating pages without editing anything) are served from
+# memory instead of re-querying. Every write path calls the matching cache
+# .clear() immediately after writing, so nothing is ever stale after a user
+# action — the TTLs below are just a safety net, not the source of correctness.
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def cached_subjects():
+    return db.get_subjects()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_questions(subject_id=None, difficulty=None):
+    return db.get_questions(subject_id=subject_id, difficulty=difficulty)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_question_counts():
+    return db.get_question_counts_by_subject()
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_topics(subject_id=None, high_yield_only=False):
+    return db.get_topics(subject_id=subject_id, high_yield_only=high_yield_only)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_flashcard_bank():
+    return db.get_flashcard_bank()
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def cached_overall_stats(uid):
+    return db.get_overall_stats(uid)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def cached_accuracy_by_subject(uid):
+    return db.get_accuracy_by_subject(uid)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def cached_attempts_over_time(uid, days):
+    return db.get_attempts_over_time(uid, days)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def cached_study_tasks(uid, status=None):
+    return db.get_study_tasks(uid, status=status)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def cached_flashcards(uid, subject_id=None, due_only=False):
+    return db.get_flashcards(uid, subject_id=subject_id, due_only=due_only)
+
+
+def _invalidate_content_cache():
+    """Call after any write to the shared questions/topics/flashcards content bank."""
+    cached_questions.clear()
+    cached_question_counts.clear()
+    cached_topics.clear()
+    cached_flashcard_bank.clear()
+
+
+def _invalidate_stats_cache():
+    """Call after any write that can change a user's stats/analytics."""
+    cached_overall_stats.clear()
+    cached_accuracy_by_subject.clear()
+    cached_attempts_over_time.clear()
+
+
+def _invalidate_tasks_cache():
+    cached_study_tasks.clear()
+    cached_overall_stats.clear()
+
+
+def _invalidate_flashcard_progress_cache():
+    cached_flashcards.clear()
+    cached_overall_stats.clear()
+
+
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="UCAT Prep",
@@ -157,7 +240,7 @@ st.markdown("""
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-SUBJECTS = db.get_subjects()
+SUBJECTS = cached_subjects()
 SUB_BY_ID = {s["id"]: s for s in SUBJECTS}
 SUB_BY_NAME = {s["name"]: s for s in SUBJECTS}
 
@@ -175,6 +258,21 @@ def subject_selectbox(label, key=None, include_all=False, default_name=None):
     if choice == "All subtests":
         return None
     return SUB_BY_NAME[choice]["id"]
+
+
+def _paginate(items, page_key, page_size=20):
+    """Slice `items` to a bounded page, with a page picker only shown when needed.
+    Keeps list-heavy admin views fast and DOM-light no matter how large the
+    underlying bank grows."""
+    total_pages = max(1, (len(items) + page_size - 1) // page_size)
+    if page_key in st.session_state and st.session_state[page_key] > total_pages:
+        st.session_state[page_key] = total_pages
+    if total_pages > 1:
+        page_num = st.number_input(f"Page (of {total_pages})", 1, total_pages, 1, key=page_key)
+    else:
+        page_num = 1
+    start = (page_num - 1) * page_size
+    return items[start:start + page_size]
 
 
 # Cognitive subtests are reported on a 300–900 scale; SJT is reported in bands.
@@ -234,7 +332,7 @@ with st.sidebar:
         for k in list(st.session_state.keys()):
             del st.session_state[k]
         st.rerun()
-    stats = db.get_overall_stats(st.session_state["user_id"])
+    stats = cached_overall_stats(st.session_state["user_id"])
     acc = (stats["correct"] / stats["attempts"] * 100) if stats["attempts"] else 0
     st.metric("Overall accuracy", f"{acc:.0f}%", help="Across all answered practice questions")
     st.metric("Cards due today", stats["cards_due"])
@@ -258,7 +356,7 @@ with st.sidebar:
 def page_dashboard():
     st.title("📊 Dashboard")
     uid = st.session_state["user_id"]
-    stats = db.get_overall_stats(uid)
+    stats = cached_overall_stats(uid)
     acc = (stats["correct"] / stats["attempts"] * 100) if stats["attempts"] else 0
 
     dte, exam_d = days_to_exam()
@@ -276,7 +374,7 @@ def page_dashboard():
     c4.metric("Study plan", f"{task_pct:.0f}%", help=f"{stats['tasks_done']} of {stats['tasks_total']} tasks done")
 
     st.markdown("### Estimated scores")
-    rows = db.get_accuracy_by_subject(uid)
+    rows = cached_accuracy_by_subject(uid)
     df = pd.DataFrame(rows)
     df["code"] = df["subject_id"].map(lambda sid: SUB_BY_ID.get(sid, {}).get("code", ""))
     df["accuracy"] = df.apply(lambda r: (r["correct"] / r["attempts"] * 100) if r["attempts"] else 0, axis=1)
@@ -322,7 +420,7 @@ def page_dashboard():
     colA, colB = st.columns(2)
     with colA:
         st.markdown("### Activity (last 30 days)")
-        ts = pd.DataFrame(db.get_attempts_over_time(uid, 30))
+        ts = pd.DataFrame(cached_attempts_over_time(uid, 30))
         if not ts.empty:
             ts["accuracy"] = ts["correct"] / ts["attempts"] * 100
             fig2 = px.line(ts, x="day", y="attempts", markers=True)
@@ -334,12 +432,7 @@ def page_dashboard():
             st.caption("No activity recorded in the last 30 days.")
     with colB:
         st.markdown("### Question bank coverage")
-        cov = pd.DataFrame(db.get_accuracy_by_subject(uid))
-        qcounts = []
-        for s in SUBJECTS:
-            qs = db.get_questions(subject_id=s["id"])
-            qcounts.append({"subject_name": s["name"], "questions": len(qs), "color": s["color"]})
-        qc = pd.DataFrame(qcounts)
+        qc = pd.DataFrame(cached_question_counts())
         if not qc.empty and qc["questions"].sum() > 0:
             fig3 = go.Figure(go.Pie(labels=qc["subject_name"], values=qc["questions"],
                                     marker_colors=qc["color"].tolist(), hole=0.45))
@@ -348,7 +441,7 @@ def page_dashboard():
 
     # Upcoming tasks
     st.markdown("### 🗓️ Upcoming study tasks")
-    tasks = [t for t in db.get_study_tasks(uid) if t["status"] != "Done"][:5]
+    tasks = [t for t in cached_study_tasks(uid) if t["status"] != "Done"][:5]
     if tasks:
         for t in tasks:
             cols = st.columns([4, 2, 2, 1])
@@ -358,6 +451,7 @@ def page_dashboard():
             cols[2].caption(f"📅 {t['due_date'] or '—'}")
             if cols[3].button("✓", key=f"dash_done_{t['id']}", help="Mark done"):
                 db.set_task_status(uid, t["id"], "Done")
+                _invalidate_tasks_cache()
                 st.rerun()
     else:
         st.caption("No open tasks. Add some in **🗓️ Study Scheduler**.")
@@ -379,7 +473,7 @@ def page_practice():
         with c3:
             n = st.number_input("Questions", 1, 50, 5, key="quiz_n")
         if st.button("▶️ Start quiz", type="primary"):
-            pool = db.get_questions(subject_id=sid, difficulty=difficulty)
+            pool = cached_questions(subject_id=sid, difficulty=difficulty)
             random.shuffle(pool)
             pool = pool[:int(n)]
             if not pool:
@@ -428,6 +522,7 @@ def page_practice():
             is_correct = (choice == q["correct"])
             elapsed = datetime.now().timestamp() - ss.get("quiz_start", datetime.now().timestamp())
             db.record_attempt(ss["user_id"], q["id"], q["subject_id"], choice, is_correct, round(elapsed, 1))
+            _invalidate_stats_cache()
             ss["quiz_answered"][idx] = choice
             if is_correct:
                 ss["quiz_correct"] += 1
@@ -467,7 +562,7 @@ def page_flashcards():
     with c2:
         due_only = st.toggle("Due only", value=True, key="fc_due")
 
-    cards = db.get_flashcards(uid, subject_id=sid, due_only=due_only)
+    cards = cached_flashcards(uid, subject_id=sid, due_only=due_only)
     if not cards:
         if due_only:
             st.success("🎉 No cards due right now. Toggle off **Due only** to review ahead, or add cards in ⚙️ Manage.")
@@ -504,6 +599,7 @@ def page_flashcards():
         for col, (lbl, quality) in zip(cols, ratings):
             if col.button(lbl, key=f"fc_rate_{quality}", use_container_width=True):
                 db.review_flashcard(uid, card["id"], quality)
+                _invalidate_flashcard_progress_cache()
                 ss["fc_show_back"] = False
                 ss["fc_pos"] = pos + 1
                 ss["fc_count"] = None  # force refresh of the due list
@@ -536,6 +632,7 @@ def page_scheduler():
                         "task_type": ttype, "due_date": due.isoformat(),
                         "duration_min": int(dur), "notes": notes,
                     })
+                    _invalidate_tasks_cache()
                     st.success("Task added.")
                     st.rerun()
                 else:
@@ -558,11 +655,12 @@ def page_scheduler():
                 due = date.today() + timedelta(days=int(i // per_day) % int(weeks))
                 db.upsert_study_task(uid, {"title": title, "subject_id": sid, "task_type": ttype,
                                            "due_date": due.isoformat(), "duration_min": 60})
+            _invalidate_tasks_cache()
             st.success(f"Generated {len(plan_tasks)} tasks.")
             st.rerun()
 
     filt = st.radio("Show", ["All", "Todo", "In Progress", "Done"], horizontal=True)
-    tasks = db.get_study_tasks(uid, status=filt)
+    tasks = cached_study_tasks(uid, status=filt)
     if not tasks:
         st.info("No tasks. Add one above or generate a plan.")
         return
@@ -576,10 +674,12 @@ def page_scheduler():
         if cols[0].checkbox("", value=done, key=f"task_chk_{t['id']}", label_visibility="collapsed"):
             if not done:
                 db.set_task_status(uid, t["id"], "Done")
+                _invalidate_tasks_cache()
                 st.rerun()
         else:
             if done:
                 db.set_task_status(uid, t["id"], "Todo")
+                _invalidate_tasks_cache()
                 st.rerun()
         title_md = f"~~{t['title']}~~" if done else f"**{t['title']}**"
         badge = pill(sub["name"], sub["color"]) if sub else ""
@@ -592,9 +692,11 @@ def page_scheduler():
                                    key=f"task_status_{t['id']}", label_visibility="collapsed")
         if status != t["status"]:
             db.set_task_status(uid, t["id"], status)
+            _invalidate_tasks_cache()
             st.rerun()
         if cols[5].button("🗑️", key=f"task_del_{t['id']}"):
             db.delete_study_task(uid, t["id"])
+            _invalidate_tasks_cache()
             st.rerun()
 
 
@@ -609,7 +711,7 @@ def page_content():
     with c2:
         hy = st.toggle("High-yield only", value=False, key="content_hy")
 
-    topics = db.get_topics(subject_id=sid, high_yield_only=hy)
+    topics = cached_topics(subject_id=sid, high_yield_only=hy)
     if not topics:
         st.info("No topics found. Add review notes in ⚙️ Manage.")
         return
@@ -734,19 +836,28 @@ def page_manage():
                         "option_a": a, "option_b": b, "option_c": cc, "option_d": d,
                         "correct": correct, "explanation": expl, "difficulty": diff,
                     })
+                    _invalidate_content_cache()
                     st.success("Question added.")
                     st.rerun()
                 else:
                     st.warning("Fill in the stem and all four options.")
         st.divider()
-        qs = db.get_questions()
-        st.caption(f"{len(qs)} questions in the bank")
-        for q in qs:
+        qs = cached_questions()
+        search = st.text_input("🔍 Search questions", key="mq_search",
+                                placeholder="Filter by keyword or subtest…")
+        filtered = qs
+        if search:
+            needle = search.lower()
+            filtered = [q for q in qs if needle in q["stem"].lower()
+                       or needle in SUB_BY_ID.get(q["subject_id"], {}).get("name", "").lower()]
+        st.caption(f"{len(filtered)} of {len(qs)} questions" if search else f"{len(qs)} questions in the bank")
+        for q in _paginate(filtered, "mq_page"):
             with st.expander(f"[{SUB_BY_ID.get(q['subject_id'],{}).get('name','?')}] {q['stem'][:70]}"):
                 st.markdown(f"**Correct:** {q['correct']} · **Difficulty:** {q['difficulty']}")
                 st.caption(q.get("explanation") or "")
                 if st.button("Delete", key=f"delq_{q['id']}"):
                     db.delete_question(q["id"])
+                    _invalidate_content_cache()
                     st.rerun()
 
     # Flashcards
@@ -759,18 +870,27 @@ def page_manage():
             if st.form_submit_button("Add flashcard", type="primary"):
                 if front and back:
                     db.upsert_flashcard({"subject_id": SUB_BY_NAME[sname]["id"], "front": front, "back": back})
+                    _invalidate_content_cache()
                     st.success("Flashcard added.")
                     st.rerun()
                 else:
                     st.warning("Fill in both sides.")
         st.divider()
-        cards = db.get_flashcard_bank()
-        st.caption(f"{len(cards)} flashcards")
-        for fc in cards:
+        cards = cached_flashcard_bank()
+        fc_search = st.text_input("🔍 Search flashcards", key="mfc_search",
+                                   placeholder="Filter by keyword or subtest…")
+        fc_filtered = cards
+        if fc_search:
+            needle = fc_search.lower()
+            fc_filtered = [fc for fc in cards if needle in fc["front"].lower() or needle in fc["back"].lower()
+                          or needle in SUB_BY_ID.get(fc["subject_id"], {}).get("name", "").lower()]
+        st.caption(f"{len(fc_filtered)} of {len(cards)} flashcards" if fc_search else f"{len(cards)} flashcards")
+        for fc in _paginate(fc_filtered, "mfc_page"):
             with st.expander(f"[{SUB_BY_ID.get(fc['subject_id'],{}).get('name','?')}] {fc['front'][:70]}"):
                 st.markdown(f"**Back:** {fc['back']}")
                 if st.button("Delete", key=f"delfc_{fc['id']}"):
                     db.delete_flashcard(fc["id"])
+                    _invalidate_content_cache()
                     st.rerun()
 
     # Topics
@@ -786,16 +906,20 @@ def page_manage():
                 if name:
                     db.upsert_topic({"subject_id": SUB_BY_NAME[sname]["id"], "name": name,
                                      "high_yield": 1 if hy else 0, "summary": summary, "content": content})
+                    _invalidate_content_cache()
                     st.success("Topic added.")
                     st.rerun()
                 else:
                     st.warning("Give the topic a name.")
         st.divider()
-        for t in db.get_topics():
+        topics_all = cached_topics()
+        st.caption(f"{len(topics_all)} topics")
+        for t in topics_all:
             with st.expander(f"{'⭐ ' if t['high_yield'] else ''}[{t['subject_name']}] {t['name']}"):
                 st.markdown(t.get("content") or "_No notes._")
                 if st.button("Delete", key=f"delt_{t['id']}"):
                     db.delete_topic(t["id"])
+                    _invalidate_content_cache()
                     st.rerun()
 
 
@@ -808,7 +932,7 @@ def _build_mock(subtest_ids):
     for s in SUBJECTS:
         if subtest_ids and s["id"] not in subtest_ids:
             continue
-        qs = db.get_questions(subject_id=s["id"])
+        qs = cached_questions(subject_id=s["id"])
         random.shuffle(qs)
         questions.extend(qs)
     budget = sum(seconds_per_question(SUB_BY_ID[q["subject_id"]]["code"]) for q in questions)
@@ -822,6 +946,7 @@ def _finish_mock(ss, elapsed):
             chosen = ss["mock_answers"].get(i)
             if chosen:
                 db.record_attempt(ss["user_id"], q["id"], q["subject_id"], chosen, chosen == q["correct"], 0)
+        _invalidate_stats_cache()
         ss["mock_graded"] = True
     ss["mock_elapsed"] = int(elapsed)
     ss["mock_done"] = True
