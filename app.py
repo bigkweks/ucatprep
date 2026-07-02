@@ -122,6 +122,16 @@ def cached_last_seen(uid):
     return db.get_last_seen_at(uid)
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def cached_mistakes(uid, include_resolved=False):
+    return db.get_mistakes(uid, include_resolved=include_resolved)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def cached_mistake_ids(uid):
+    return db.get_mistake_question_ids(uid)
+
+
 def _invalidate_content_cache():
     """Call after any write to the shared questions/topics/flashcards content bank."""
     cached_questions.clear()
@@ -140,6 +150,8 @@ def _invalidate_stats_cache():
     cached_leaderboard_pace.clear()
     cached_leaderboard_mock_scores.clear()
     cached_last_seen.clear()
+    cached_mistakes.clear()
+    cached_mistake_ids.clear()
 
 
 def _invalidate_tasks_cache():
@@ -478,6 +490,7 @@ NAV_ITEMS = [
     ("📊 Dashboard", "📊", "Home"),
     ("🧭 UCAT Guide", "🧭", "Guide"),
     ("📝 Practice Questions", "📝", "Practice"),
+    ("🔁 Mistakes Bank", "🔁", "Fixes"),
     ("⏱️ Mock Exam", "⏱️", "Mock"),
     ("🏆 Leaderboard", "🏆", "Ranks"),
     ("🃏 Flashcards", "🃏", "Cards"),
@@ -666,19 +679,24 @@ def _passage_units(pool):
     return units
 
 
-def _unit_priority(unit, seen_map):
-    """Sort key for a quiz unit: unseen questions first (in random order among
-    themselves), then seen ones ordered least- before most-recently-seen. Lets
-    a student cycle through the whole bank before anything repeats, instead of
-    every quiz sampling purely at random with no memory of what was already
-    answered."""
+def _unit_priority(unit, seen_map, mistake_ids):
+    """Sort key for a quiz unit, lowest first:
+      0. Unseen questions (random order among themselves) — coverage first.
+      1. Unresolved mistakes (oldest-seen first) — a reliable boost over
+         ordinary review, so questions you've gotten wrong come up more often,
+         without displacing brand-new material entirely.
+      2. Ordinary seen-and-correct review, oldest-seen first.
+    Lets a student cycle through the whole bank before anything repeats, and
+    surface past mistakes more often than chance, instead of every quiz
+    sampling purely at random with no memory of what was already answered."""
     times = [seen_map.get(q["id"]) for q in unit]
     if all(t is None for t in times):
         return (0, random.random())
-    return (1, max(t for t in times if t is not None))
+    tier = 1 if any(q["id"] in mistake_ids for q in unit) else 2
+    return (tier, max(t for t in times if t is not None))
 
 
-def _mixed_unit_order(pool, seen_map=None):
+def _mixed_unit_order(pool, seen_map=None, mistake_ids=None):
     """Order a pool's units (see _passage_units) for a quiz, guaranteeing an even
     mix across subtests instead of a flat shuffle. Decision Making's standalone
     questions form far more, smaller units than VR/QR/SJT's passage sets — a
@@ -687,16 +705,17 @@ def _mixed_unit_order(pool, seen_map=None):
     draw from. Round-robining across subtests (each subtest's own units ordered
     by _unit_priority, one drawn from each in a freshly-shuffled rotation every
     pass) means every represented subtest appears before any one repeats, and
-    within each subtest unseen/long-unseen questions come up before recent
-    repeats — so a short mixed quiz reliably samples new material rather than
-    randomly re-serving whatever you just answered."""
+    within each subtest unseen material and unresolved mistakes come up before
+    ordinary repeats — so a short mixed quiz reliably samples new material and
+    past mistakes rather than randomly re-serving whatever you just answered."""
     seen_map = seen_map or {}
+    mistake_ids = mistake_ids or set()
     units = _passage_units(pool)
     by_subject: dict = {}
     for u in units:
         by_subject.setdefault(u[0]["subject_id"], []).append(u)
     for lst in by_subject.values():
-        lst.sort(key=lambda u: _unit_priority(u, seen_map))
+        lst.sort(key=lambda u: _unit_priority(u, seen_map, mistake_ids))
     remaining = list(by_subject.keys())
     ordered = []
     while remaining:
@@ -809,12 +828,15 @@ def page_practice():
             pool = cached_questions(subject_id=sid, difficulty=difficulty)
             # Keep passage sets intact and in order, round-robin across subtests
             # when mixing so a short quiz reliably samples every subtest's
-            # format, and prioritise unseen / least-recently-seen questions so
-            # practice cycles through the bank instead of repeating at random.
-            # Then take units until reaching the requested count (a passage set
-            # may nudge the total slightly over rather than be cut in half).
+            # format, prioritise unseen / least-recently-seen questions so
+            # practice cycles through the bank instead of repeating at random,
+            # and give unresolved mistakes a boost so they come up more often
+            # until answered correctly twice in a row. Then take units until
+            # reaching the requested count (a passage set may nudge the total
+            # slightly over rather than be cut in half).
             seen_map = cached_last_seen(ss["user_id"])
-            units = _mixed_unit_order(pool, seen_map)
+            mistake_ids = cached_mistake_ids(ss["user_id"])
+            units = _mixed_unit_order(pool, seen_map, mistake_ids)
             quiz: list = []
             for u in units:
                 if len(quiz) >= int(n):
@@ -901,6 +923,64 @@ def page_practice():
         if st.button("Next ▶️", type="primary"):
             ss["quiz_idx"] += 1
             st.rerun()
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# MISTAKES BANK
+# ════════════════════════════════════════════════════════════════════════════
+def page_mistakes():
+    st.title("🔁 Mistakes Bank")
+    st.caption(f"Every question you get wrong lands here, and comes up more often in Practice until "
+               f"you answer it correctly {db.MISTAKE_CLEAR_STREAK} times in a row.")
+    ss = st.session_state
+    uid = ss["user_id"]
+
+    unresolved = cached_mistakes(uid, include_resolved=False)
+    all_rows = cached_mistakes(uid, include_resolved=True)
+    resolved = [m for m in all_rows if m["resolved"]]
+
+    c1, c2 = st.columns(2)
+    c1.metric("Needs work", len(unresolved))
+    c2.metric("Mastered", len(resolved), help=f"Answered correctly {db.MISTAKE_CLEAR_STREAK} times in a "
+              "row after missing it — cleared from the bank.")
+
+    if not unresolved:
+        st.success("🎉 No unresolved mistakes right now — nice work. Keep practising and anything you "
+                   "miss will show up here.")
+        return
+
+    if st.button("▶️ Practice my mistakes", type="primary"):
+        mistake_ids = {m["question_id"] for m in unresolved}
+        pool = [q for q in cached_questions() if q["id"] in mistake_ids]
+        seen_map = cached_last_seen(uid)
+        units = _mixed_unit_order(pool, seen_map)
+        quiz: list = []
+        for u in units:
+            quiz.extend(u)
+        ss["quiz"] = quiz
+        ss["quiz_idx"] = 0
+        ss["quiz_answered"] = {}
+        ss["quiz_correct"] = 0
+        ss["quiz_times"] = {}
+        ss["quiz_start"] = datetime.now().timestamp()
+        ss["nav_page"] = "📝 Practice Questions"
+        st.rerun()
+
+    st.markdown("### Needs work")
+    for m in unresolved:
+        with st.container(border=True):
+            st.markdown(pill(m["subject_name"], m["color"]) +
+                       f"&nbsp; <span style='color:#888'>{m['difficulty']}</span>", unsafe_allow_html=True)
+            stem = m["stem"]
+            st.markdown(f"**{stem[:160]}{'…' if len(stem) > 160 else ''}**")
+            st.caption(f"Missed {m['times_wrong']}× · {m['correct_streak']}/{db.MISTAKE_CLEAR_STREAK} "
+                       "correct in a row to clear")
+
+    if resolved:
+        with st.expander(f"✅ Mastered ({len(resolved)})"):
+            for m in resolved:
+                st.markdown(pill(m["subject_name"], m["color"]) + f"&nbsp; {m['stem'][:120]}"
+                           f"{'…' if len(m['stem']) > 120 else ''}", unsafe_allow_html=True)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -2083,6 +2163,7 @@ PAGES = {
     "📊 Dashboard": page_dashboard,
     "🧭 UCAT Guide": page_guide,
     "📝 Practice Questions": page_practice,
+    "🔁 Mistakes Bank": page_mistakes,
     "⏱️ Mock Exam": page_mock,
     "🏆 Leaderboard": page_leaderboard,
     "🃏 Flashcards": page_flashcards,
