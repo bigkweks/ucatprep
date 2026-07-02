@@ -227,6 +227,18 @@ CREATE TABLE IF NOT EXISTS mock_results (
     cog_total  INTEGER,
     created_at TEXT
 );
+CREATE TABLE IF NOT EXISTS mistakes (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    question_id    INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+    times_wrong    INTEGER DEFAULT 0,
+    correct_streak INTEGER DEFAULT 0,
+    resolved       INTEGER DEFAULT 0,
+    added_at       TEXT,
+    last_seen_at   TEXT,
+    resolved_at    TEXT,
+    UNIQUE(user_id, question_id)
+);
 CREATE TABLE IF NOT EXISTS flashcards (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     subject_id    INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
@@ -351,6 +363,18 @@ _PG_TABLES = [
         total      INTEGER NOT NULL,
         cog_total  INTEGER,
         created_at TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS mistakes (
+        id             SERIAL PRIMARY KEY,
+        user_id        INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        question_id    INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+        times_wrong    INTEGER DEFAULT 0,
+        correct_streak INTEGER DEFAULT 0,
+        resolved       INTEGER DEFAULT 0,
+        added_at       TEXT,
+        last_seen_at   TEXT,
+        resolved_at    TEXT,
+        UNIQUE(user_id, question_id)
     )""",
     """CREATE TABLE IF NOT EXISTS flashcards (
         id            SERIAL PRIMARY KEY,
@@ -523,6 +547,7 @@ def init_db():
         _migrate_passage_id(conn)
         _migrate_question_options(conn)
         _migrate_question_format(conn)
+        _backfill_mistakes_from_history(conn)
     finally:
         _close(conn)
     seed_content()
@@ -767,6 +792,85 @@ def get_last_seen_at(user_id):
         _close(conn)
 
 
+# Number of consecutive correct answers needed to clear a question out of the
+# mistakes bank. A single lucky guess shouldn't count as mastery, but this
+# isn't meant to be a heavyweight spaced-repetition schedule either.
+MISTAKE_CLEAR_STREAK = 2
+
+
+def _backfill_mistakes_from_history(conn):
+    """One-time backfill: derive each user's current mistakes-bank state from
+    their full existing attempts history, so a deployment that already has
+    real usage doesn't lose track of genuine past mistakes just because this
+    feature was added later. Replays each (user, question) pair's attempts in
+    order through the same state machine _upsert_mistake uses live. Guarded on
+    the mistakes table being empty, so it runs once — after that, real play
+    naturally keeps it populated and re-scanning the full attempts history on
+    every boot would be wasted work."""
+    if _q1(conn, "SELECT 1 FROM mistakes LIMIT 1"):
+        return
+    rows = _q(conn, """
+        SELECT user_id, question_id, is_correct, created_at FROM attempts
+        WHERE user_id IS NOT NULL ORDER BY user_id, question_id, created_at
+    """)
+    state: dict = {}
+    for r in rows:
+        key = (r["user_id"], r["question_id"])
+        s = state.setdefault(key, {"times_wrong": 0, "correct_streak": 0, "resolved": 0,
+                                    "resolved_at": None, "added_at": r["created_at"]})
+        if r["is_correct"]:
+            if s["times_wrong"] > 0:
+                s["correct_streak"] += 1
+                if s["correct_streak"] >= MISTAKE_CLEAR_STREAK and not s["resolved"]:
+                    s["resolved"] = 1
+                    s["resolved_at"] = r["created_at"]
+        else:
+            s["times_wrong"] += 1
+            s["correct_streak"] = 0
+            s["resolved"] = 0
+            s["resolved_at"] = None
+        s["last_seen_at"] = r["created_at"]
+    for (uid, qid), s in state.items():
+        if s["times_wrong"] == 0:
+            continue
+        _run(conn, _n("""INSERT INTO mistakes (user_id, question_id, times_wrong, correct_streak,
+                   resolved, added_at, last_seen_at, resolved_at)
+                   VALUES (:u,:q,:tw,:cs,:r,:aa,:ls,:ra)"""),
+             {"u": uid, "q": qid, "tw": s["times_wrong"], "cs": s["correct_streak"], "r": s["resolved"],
+              "aa": s["added_at"], "ls": s["last_seen_at"], "ra": s["resolved_at"]})
+    _commit(conn)
+
+
+def _upsert_mistake(conn, user_id, question_id, is_correct):
+    """Keep a user's mistakes-bank row for this question in sync with the
+    answer just given. A wrong answer adds/refreshes an unresolved entry; a
+    right answer builds a correct-streak that clears (resolves) the entry once
+    it reaches MISTAKE_CLEAR_STREAK. Getting it wrong again after being
+    resolved un-resolves it — the bank reflects current mastery, not history."""
+    ph = _ph()
+    now = datetime.now().isoformat()
+    existing = _q1(conn, f"SELECT * FROM mistakes WHERE user_id = {ph} AND question_id = {ph}",
+                   (user_id, question_id))
+    if is_correct:
+        if not existing:
+            return  # never missed, nothing to track
+        streak = existing["correct_streak"] + 1
+        newly_resolved = streak >= MISTAKE_CLEAR_STREAK
+        resolved_at = existing["resolved_at"] or (now if newly_resolved else None)
+        _run(conn, _n("""UPDATE mistakes SET correct_streak = :s, resolved = :r,
+                   last_seen_at = :ls, resolved_at = :ra WHERE user_id = :u AND question_id = :q"""),
+             {"s": streak, "r": 1 if newly_resolved else 0, "ls": now, "ra": resolved_at,
+              "u": user_id, "q": question_id})
+    elif existing:
+        _run(conn, _n("""UPDATE mistakes SET times_wrong = :tw, correct_streak = 0, resolved = 0,
+                   last_seen_at = :ls, resolved_at = NULL WHERE user_id = :u AND question_id = :q"""),
+             {"tw": existing["times_wrong"] + 1, "ls": now, "u": user_id, "q": question_id})
+    else:
+        _run(conn, _n("""INSERT INTO mistakes (user_id, question_id, times_wrong, correct_streak,
+                   resolved, added_at, last_seen_at) VALUES (:u, :q, 1, 0, 0, :ca, :ca)"""),
+             {"u": user_id, "q": question_id, "ca": now})
+
+
 def record_attempt(user_id, question_id, subject_id, chosen, is_correct, seconds=0):
     conn = get_conn()
     try:
@@ -776,7 +880,38 @@ def record_attempt(user_id, question_id, subject_id, chosen, is_correct, seconds
         """), {"user_id": user_id, "question_id": question_id, "subject_id": subject_id, "chosen": chosen,
                "is_correct": 1 if is_correct else 0, "seconds": seconds,
                "created_at": datetime.now().isoformat()})
+        _upsert_mistake(conn, user_id, question_id, is_correct)
         _commit(conn)
+    finally:
+        _close(conn)
+
+
+def get_mistakes(user_id, include_resolved=False):
+    """A user's mistakes-bank rows, joined with question/subject info for
+    display. Unresolved (still-needs-work) first by default."""
+    ph = _ph()
+    conn = get_conn()
+    try:
+        sql = f"""SELECT m.*, q.stem, q.difficulty, s.name AS subject_name, s.color
+                   FROM mistakes m JOIN questions q ON q.id = m.question_id
+                   JOIN subjects s ON s.id = q.subject_id
+                   WHERE m.user_id = {ph}"""
+        if not include_resolved:
+            sql += " AND m.resolved = 0"
+        sql += " ORDER BY m.resolved ASC, m.last_seen_at DESC"
+        return _q(conn, sql, (user_id,))
+    finally:
+        _close(conn)
+
+
+def get_mistake_question_ids(user_id):
+    """Set of question_ids currently unresolved in the mistakes bank, used to
+    give them a priority boost in practice quizzes."""
+    ph = _ph()
+    conn = get_conn()
+    try:
+        rows = _q(conn, f"SELECT question_id FROM mistakes WHERE user_id = {ph} AND resolved = 0", (user_id,))
+        return {r["question_id"] for r in rows}
     finally:
         _close(conn)
 
