@@ -132,6 +132,100 @@ st.set_page_config(
 
 db.init_db()
 
+# ── Theme (paper / ink / teal, serif headings + mono numerics) ─────────────────
+# Mirrors the palette and type system used by the UCAT Guide page, so the whole
+# app reads as one design system rather than a native-Streamlit default plus one
+# custom-styled page.
+st.markdown("""
+<style>
+:root{
+    --paper:#EFF1EC; --paper-2:#FAFBF8; --card:#FFFFFF;
+    --ink:#16211F; --ink-soft:#4C5651; --ink-faint:#78827C;
+    --line:#DBDFD6; --line-strong:#C7CCC1;
+    --teal:#0C6B58; --teal-bright:#0F8A70; --teal-wash:#E4EFEA;
+    --coral:#C24A38; --coral-wash:#F6E6E1;
+    --gold:#B5762A; --gold-wash:#F3E7D6;
+    --serif:"Charter","Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+}
+html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
+    background: var(--paper) !important; color: var(--ink); font-family: var(--sans);
+}
+[data-testid="stMarkdownContainer"] h1, [data-testid="stMarkdownContainer"] h2,
+[data-testid="stMarkdownContainer"] h3 {
+    font-family: var(--serif) !important; font-weight: 600 !important;
+    letter-spacing: -.01em; color: var(--ink);
+}
+
+/* Sidebar */
+[data-testid="stSidebar"] { background: var(--ink) !important; }
+[data-testid="stSidebar"] p, [data-testid="stSidebar"] span,
+[data-testid="stSidebar"] label, [data-testid="stSidebar"] div { color: var(--paper) !important; }
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h1,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h2 { color: #FFFFFF !important; }
+[data-testid="stSidebar"] [data-testid="stMetric"] { background: transparent !important; border: none !important; padding: 4px 0 !important; }
+[data-testid="stSidebar"] [data-testid="stMetricValue"] { color: #FFFFFF !important; font-size: 20px !important; }
+[data-testid="stSidebar"] [data-testid="stMetricLabel"] { color: #9FB3AB !important; }
+[data-testid="stSidebar"] hr { border-color: rgba(255,255,255,0.14) !important; }
+[data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) p { color: var(--teal-bright) !important; font-weight: 600 !important; }
+[data-testid="stSidebar"] [role="radiogroup"] input { accent-color: var(--teal-bright); }
+[data-testid="stSidebar"] button[kind^="secondary"] { background: rgba(255,255,255,0.07) !important; border: 1px solid rgba(255,255,255,0.3) !important; }
+[data-testid="stSidebar"] button[kind^="secondary"]:hover { background: rgba(255,255,255,0.14) !important; border-color: var(--teal-bright) !important; }
+[data-testid="stSidebar"] button[kind^="secondary"] p { color: var(--paper) !important; }
+
+/* Buttons */
+button[kind^="primary"] { background: var(--teal) !important; border: 1px solid var(--teal) !important; color: #fff !important; border-radius: 8px !important; font-weight: 600 !important; }
+button[kind^="primary"]:hover { background: var(--teal-bright) !important; border-color: var(--teal-bright) !important; }
+button[kind^="secondary"] { border: 1px solid var(--line-strong) !important; border-radius: 8px !important; color: var(--ink) !important; font-weight: 600 !important; }
+button[kind^="secondary"]:hover { border-color: var(--teal) !important; color: var(--teal) !important; }
+
+/* Tabs */
+[data-baseweb="tab-list"] { border-bottom: 1px solid var(--line) !important; gap: 1.6rem !important; }
+[data-testid="stTab"] { color: var(--ink-soft) !important; font-family: var(--sans) !important; }
+[data-testid="stTab"][aria-selected="true"] { color: var(--teal) !important; font-weight: 600 !important; }
+[data-baseweb="tab-highlight"] { background-color: var(--teal) !important; }
+
+/* Metrics */
+[data-testid="stMetric"] { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; }
+[data-testid="stMetricValue"] { font-family: var(--serif) !important; font-weight: 700 !important; color: var(--teal); font-variant-numeric: tabular-nums; }
+[data-testid="stMetricLabel"] p { font-family: var(--mono) !important; text-transform: uppercase; letter-spacing: .07em; font-size: .7rem !important; color: var(--ink-faint) !important; }
+
+/* Expanders */
+[data-testid="stExpander"] { border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+[data-testid="stExpander"] summary { font-weight: 600; color: var(--ink); }
+
+/* Alerts */
+[data-testid="stAlertContentInfo"] { background: var(--teal-wash) !important; color: var(--ink) !important; border-left: 3px solid var(--teal) !important; }
+[data-testid="stAlertContentSuccess"] { background: var(--teal-wash) !important; color: var(--ink) !important; border-left: 3px solid var(--teal-bright) !important; }
+[data-testid="stAlertContentWarning"] { background: var(--gold-wash) !important; color: var(--ink) !important; border-left: 3px solid var(--gold) !important; }
+[data-testid="stAlertContentError"] { background: var(--coral-wash) !important; color: var(--ink) !important; border-left: 3px solid var(--coral) !important; }
+[data-testid="stAlertContainer"] { border-radius: 8px; }
+
+/* Progress bar */
+[data-testid="stProgress"] > div > div > div { background: var(--teal) !important; }
+
+/* Misc */
+hr { border-color: var(--line) !important; }
+[data-testid="metric-container"] {
+    background: white; border-radius: 10px; padding: 16px 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08); border: 1px solid var(--line);
+}
+.flashcard {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 38px 28px; text-align: center; font-size: 19px; color: var(--ink);
+    font-family: var(--serif); box-shadow: 0 4px 14px rgba(0,0,0,0.05); min-height: 150px;
+    display: flex; align-items: center; justify-content: center;
+}
+.pill { display:inline-block; padding:2px 10px; border-radius:12px; font-size:12px; font-weight:600; color:white; font-family: var(--sans); }
+.auth-hero { max-width:380px; margin:60px auto 0; text-align:center; }
+.auth-hero .mark { font-size:2.6rem; margin-bottom:8px; }
+.auth-hero h2 { font-family: var(--serif); margin-bottom:4px; color: var(--ink); }
+.auth-hero .eyebrow { font-family: var(--mono); font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color: var(--teal); margin-bottom:6px; }
+.auth-hero p { color: var(--ink-soft); margin-bottom:28px; font-size:14px; }
+</style>
+""", unsafe_allow_html=True)
+
 
 # ── Site gate (optional) + per-account login ───────────────────────────────────
 def _check_site_password() -> bool:
@@ -140,10 +234,11 @@ def _check_site_password() -> bool:
     if not pwd or st.session_state.get("_site_authenticated"):
         return True
     st.markdown(
-        "<div style='max-width:380px;margin:80px auto 0;text-align:center'>"
-        "<div style='font-size:3rem;margin-bottom:8px'>🩺</div>"
-        "<h2 style='margin-bottom:4px'>UCAT Prep</h2>"
-        "<p style='color:#888;margin-bottom:28px;font-size:14px'>Enter the site password to continue</p>"
+        "<div class='auth-hero'>"
+        "<div class='mark'>🩺</div>"
+        "<div class='eyebrow'>UCAT Prep</div>"
+        "<h2>Welcome back</h2>"
+        "<p>Enter the site password to continue</p>"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -165,10 +260,11 @@ def _check_account() -> bool:
     if st.session_state.get("user_id"):
         return True
     st.markdown(
-        "<div style='max-width:380px;margin:60px auto 0;text-align:center'>"
-        "<div style='font-size:3rem;margin-bottom:8px'>🩺</div>"
-        "<h2 style='margin-bottom:4px'>UCAT Prep</h2>"
-        "<p style='color:#888;margin-bottom:28px;font-size:14px'>Sign in to your account to start studying</p>"
+        "<div class='auth-hero'>"
+        "<div class='mark'>🩺</div>"
+        "<div class='eyebrow'>UCAT Prep</div>"
+        "<h2>Score in the top decile.</h2>"
+        "<p>Sign in to your account to start studying</p>"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -213,30 +309,6 @@ def _check_account() -> bool:
 
 _check_site_password()
 _check_account()
-
-# ── Styling ───────────────────────────────────────────────────────────────────
-st.markdown("""
-<style>
-[data-testid="stSidebar"] { background: #11324D !important; }
-[data-testid="stSidebar"] p, [data-testid="stSidebar"] span,
-[data-testid="stSidebar"] label, [data-testid="stSidebar"] div { color: #CFE3F2 !important; }
-[data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 { color: #FFFFFF !important; }
-[data-testid="stSidebar"] [data-testid="stMetricValue"] { color: #FFFFFF !important; font-size: 20px !important; }
-[data-testid="stSidebar"] [data-testid="stMetricLabel"] { color: #9FC2DD !important; }
-[data-testid="metric-container"] {
-    background: white; border-radius: 10px; padding: 16px 20px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.08); border: 1px solid #E5EDF5;
-}
-.stTabs [aria-selected="true"] { color: #2E86C1 !important; border-bottom-color: #2E86C1 !important; font-weight: 600 !important; }
-.flashcard {
-    background: white; border: 1px solid #DCE6F0; border-radius: 14px;
-    padding: 38px 28px; text-align: center; font-size: 19px; color: #1B2B3A;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.06); min-height: 150px;
-    display: flex; align-items: center; justify-content: center;
-}
-.pill { display:inline-block; padding:2px 10px; border-radius:12px; font-size:12px; font-weight:600; color:white; }
-</style>
-""", unsafe_allow_html=True)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

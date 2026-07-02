@@ -976,10 +976,10 @@ def get_overall_stats(user_id):
 # ── Seed content ───────────────────────────────────────────────────────────────
 
 _SUBJECTS = [
-    ("VR",  "Verbal Reasoning",       "#1f77b4", 1),
-    ("DM",  "Decision Making",        "#2ca02c", 2),
-    ("QR",  "Quantitative Reasoning", "#9467bd", 3),
-    ("SJT", "Situational Judgement",  "#ff7f0e", 4),
+    ("VR",  "Verbal Reasoning",       "#3B6488", 1),
+    ("DM",  "Decision Making",        "#6E5299", 2),
+    ("QR",  "Quantitative Reasoning", "#12795C", 3),
+    ("SJT", "Situational Judgement",  "#B06A2C", 4),
 ]
 
 # topics: (subject_code, name, high_yield, summary, content)
@@ -2071,10 +2071,23 @@ _FLASHCARDS = [
 ]
 
 
+def _sync_subject_colors():
+    """Keep each subject's color in sync with _SUBJECTS, so a palette change here
+    reaches every deployment's existing rows, not just freshly-seeded databases."""
+    conn = get_conn()
+    try:
+        for code, _name, color, _order in _SUBJECTS:
+            _run(conn, _n("UPDATE subjects SET color = :col WHERE code = :c"), {"col": color, "c": code})
+        _commit(conn)
+    finally:
+        _close(conn)
+
+
 def seed_content():
     """Idempotently load the starter MCAT content the first time the app runs."""
     existing = get_subjects()
     if existing:
+        _sync_subject_colors()
         return  # already seeded
     conn = get_conn()
     try:
