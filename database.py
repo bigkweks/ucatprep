@@ -207,6 +207,14 @@ CREATE TABLE IF NOT EXISTS attempts (
     seconds     REAL DEFAULT 0,
     created_at  TEXT
 );
+CREATE TABLE IF NOT EXISTS mock_results (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    correct    INTEGER NOT NULL,
+    total      INTEGER NOT NULL,
+    cog_total  INTEGER,
+    created_at TEXT
+);
 CREATE TABLE IF NOT EXISTS flashcards (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     subject_id    INTEGER NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
@@ -311,6 +319,14 @@ _PG_TABLES = [
         is_correct  INTEGER NOT NULL,
         seconds     DOUBLE PRECISION DEFAULT 0,
         created_at  TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS mock_results (
+        id         SERIAL PRIMARY KEY,
+        user_id    INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        correct    INTEGER NOT NULL,
+        total      INTEGER NOT NULL,
+        cog_total  INTEGER,
+        created_at TEXT
     )""",
     """CREATE TABLE IF NOT EXISTS flashcards (
         id            SERIAL PRIMARY KEY,
@@ -649,6 +665,23 @@ def record_attempt(user_id, question_id, subject_id, chosen, is_correct, seconds
         _close(conn)
 
 
+def record_mock_result(user_id, correct, total, cog_total=None):
+    """Persist one completed Mock Exam so leaderboards can rank best scores.
+
+    Individual attempts don't carry a session/exam id, so a mock's overall
+    result has nowhere else to live once the results screen is left."""
+    conn = get_conn()
+    try:
+        _run(conn, _n("""
+            INSERT INTO mock_results (user_id, correct, total, cog_total, created_at)
+            VALUES (:user_id, :correct, :total, :cog_total, :created_at)
+        """), {"user_id": user_id, "correct": correct, "total": total, "cog_total": cog_total,
+               "created_at": datetime.now().isoformat()})
+        _commit(conn)
+    finally:
+        _close(conn)
+
+
 # ── Flashcards (SM-2 lite spaced repetition) ───────────────────────────────────
 
 def get_flashcard_bank():
@@ -957,6 +990,60 @@ def get_daily_pace(user_id, days=30):
             GROUP BY substr(a.created_at, 1, 10), s.code
             ORDER BY day
         """, (user_id, start))
+    finally:
+        _close(conn)
+
+
+# ── Leaderboards ─────────────────────────────────────────────────────────────
+# Each returns every qualifying user ranked best-first (no LIMIT — the app
+# layer slices the top N and separately locates the current user's own row,
+# since the two aren't always the same slice).
+
+def get_leaderboard_questions_answered():
+    conn = get_conn()
+    try:
+        return _q(conn, """
+            SELECT u.id AS user_id, u.username AS username, COUNT(*) AS value
+            FROM attempts a JOIN users u ON u.id = a.user_id
+            GROUP BY u.id, u.username
+            ORDER BY value DESC
+        """)
+    finally:
+        _close(conn)
+
+
+def get_leaderboard_pace(min_attempts=50):
+    """Fastest average seconds/question, restricted to users with enough timed
+    attempts that a low average reflects real pace rather than a lucky handful
+    of quick questions."""
+    ph = _ph()
+    conn = get_conn()
+    try:
+        return _q(conn, f"""
+            SELECT u.id AS user_id, u.username AS username,
+                   COUNT(*) AS attempts, AVG(a.seconds) AS value
+            FROM attempts a JOIN users u ON u.id = a.user_id
+            WHERE a.seconds > 0
+            GROUP BY u.id, u.username
+            HAVING COUNT(*) >= {ph}
+            ORDER BY value ASC
+        """, (min_attempts,))
+    finally:
+        _close(conn)
+
+
+def get_leaderboard_mock_scores():
+    """Best indicative cognitive total (out of 2700) each user has achieved
+    across all their completed Mock Exams."""
+    conn = get_conn()
+    try:
+        return _q(conn, """
+            SELECT u.id AS user_id, u.username AS username, MAX(m.cog_total) AS value
+            FROM mock_results m JOIN users u ON u.id = m.user_id
+            WHERE m.cog_total IS NOT NULL
+            GROUP BY u.id, u.username
+            ORDER BY value DESC
+        """)
     finally:
         _close(conn)
 
