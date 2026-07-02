@@ -210,6 +210,29 @@ button[kind^="secondary"]:hover { border-color: var(--teal) !important; color: v
 [data-testid="stTab"][aria-selected="true"] { color: var(--teal) !important; font-weight: 600 !important; }
 [data-baseweb="tab-highlight"] { background-color: var(--teal) !important; }
 
+/* Top navigation bar */
+.st-key-topnav {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 10px 10px 2px; margin-bottom: 22px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.st-key-topnav [data-testid="stHorizontalBlock"] { gap: 6px !important; margin-bottom: 8px; }
+.st-key-topnav button {
+    border-radius: 999px !important; border: 1px solid transparent !important;
+    background: transparent !important; color: var(--ink-soft) !important;
+    font-family: var(--sans) !important; font-weight: 600 !important; font-size: 13.5px !important;
+    padding: 8px 6px !important; min-height: 40px; white-space: normal !important;
+    box-shadow: none !important; transition: background .12s ease, color .12s ease;
+}
+.st-key-topnav button:hover {
+    background: var(--teal-wash) !important; color: var(--teal) !important;
+    border-color: transparent !important;
+}
+.st-key-topnav button[kind="primary"] {
+    background: var(--teal) !important; color: #fff !important; border-color: var(--teal) !important;
+}
+.st-key-topnav button[kind="primary"]:hover { background: var(--teal-bright) !important; border-color: var(--teal-bright) !important; }
+.st-key-topnav button p { font-family: var(--sans) !important; font-weight: inherit !important; }
+
 /* Metrics */
 [data-testid="stMetric"] { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 18px; }
 [data-testid="stMetricValue"] { font-family: var(--serif) !important; font-weight: 700 !important; color: var(--teal); font-variant-numeric: tabular-nums; }
@@ -420,7 +443,7 @@ def days_to_exam():
         return None, None
 
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
+# ── Sidebar (account + at-a-glance stats) ──────────────────────────────────────
 with st.sidebar:
     st.markdown("## 🩺 UCAT Prep")
     st.caption(f"👤 Signed in as **{st.session_state.get('username', '')}**")
@@ -436,14 +459,36 @@ with st.sidebar:
     if dte is not None:
         st.metric("Days to exam", dte)
     st.markdown("---")
-    page = st.radio(
-        "Navigate",
-        ["📊 Dashboard", "🧭 UCAT Guide", "📝 Practice Questions", "⏱️ Mock Exam", "🏆 Leaderboard",
-         "🃏 Flashcards", "🗓️ Study Scheduler", "📚 Strategy & Skills", "🤖 AI Tutor", "⚙️ Manage"],
-        label_visibility="collapsed",
-    )
-    st.markdown("---")
     st.caption("Set an exam date in ⚙️ Manage to enable the countdown.")
+
+
+# ── Top navigation ──────────────────────────────────────────────────────────────
+NAV_ITEMS = [
+    ("📊 Dashboard", "📊", "Dashboard"),
+    ("🧭 UCAT Guide", "🧭", "Guide"),
+    ("📝 Practice Questions", "📝", "Practice"),
+    ("⏱️ Mock Exam", "⏱️", "Mock Exam"),
+    ("🏆 Leaderboard", "🏆", "Leaderboard"),
+    ("🃏 Flashcards", "🃏", "Flashcards"),
+    ("🗓️ Study Scheduler", "🗓️", "Scheduler"),
+    ("📚 Strategy & Skills", "📚", "Strategy"),
+    ("🤖 AI Tutor", "🤖", "AI Tutor"),
+    ("⚙️ Manage", "⚙️", "Manage"),
+]
+st.session_state.setdefault("nav_page", NAV_ITEMS[0][0])
+
+with st.container(key="topnav"):
+    for row in (NAV_ITEMS[:5], NAV_ITEMS[5:]):
+        cols = st.columns(len(row))
+        for col, (full_key, icon, short) in zip(cols, row):
+            active = st.session_state["nav_page"] == full_key
+            with col:
+                if st.button(f"{icon}  {short}", key=f"nav_btn_{full_key}",
+                             type="primary" if active else "secondary", width="stretch"):
+                    st.session_state["nav_page"] = full_key
+                    st.rerun()
+
+page = st.session_state["nav_page"]
 
 
 # ════════════════════════════════════════════════════════════════════════════
