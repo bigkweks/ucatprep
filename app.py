@@ -353,7 +353,7 @@ COGNITIVE_CODES = {"VR", "DM", "QR"}
 # Official UCAT pacing (current 2025+ format): (questions, minutes) per subtest.
 # Used to derive a realistic per-question time budget for mock exams.
 SUBTEST_TIMING = {
-    "VR":  (44, 21),
+    "VR":  (44, 22),
     "DM":  (35, 37),
     "QR":  (36, 26),
     "SJT": (69, 26),
@@ -773,21 +773,501 @@ def page_scheduler():
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# UCAT GUIDE (static playbook)
+# UCAT GUIDE (native page — a full strategy playbook)
 # ════════════════════════════════════════════════════════════════════════════
-_GUIDE_PATH = os.path.join(os.path.dirname(__file__), "assets", "ucat_guide.html")
+_SCORE_ANCHORS = [(1580, 10), (1680, 20), (1760, 30), (1820, 40), (1880, 50),
+                   (1950, 60), (2020, 70), (2100, 80), (2200, 90), (2340, 97)]
 
 
-@st.cache_data(show_spinner=False)
-def _load_guide_html() -> str:
-    with open(_GUIDE_PATH, encoding="utf-8") as f:
-        return f.read()
+def _score_percentile(total):
+    lo = _SCORE_ANCHORS[0]
+    if total <= lo[0]:
+        return max(1, round(lo[1] * total / lo[0]))
+    for a, b in zip(_SCORE_ANCHORS, _SCORE_ANCHORS[1:]):
+        if total <= b[0]:
+            return round(a[1] + (b[1] - a[1]) * (total - a[0]) / (b[0] - a[0]))
+    return 99
+
+
+def _score_tier(total):
+    if total >= 2300:
+        return "Outstanding", "Top few percent — competitive for the most selective courses."
+    if total >= 2100:
+        return "Excellent", "Top 20% of the cohort — a strong, widely competitive score."
+    if total >= 1950:
+        return "Above average", "Above the median. Solid, and competitive at many schools."
+    if total >= 1760:
+        return "Around average", "Middle of the pack — room to push into the upper deciles."
+    return "Building", "Below this year's average — a clear focus area to train up."
+
+
+def _g_card(name, tagline, color, count, minutes, per_q, fmt):
+    with st.container(border=True):
+        st.markdown(pill(name, color), unsafe_allow_html=True)
+        st.markdown(f"**{tagline}**")
+        st.caption(f"QUESTIONS  **{count}**  ·  TIME  **{minutes} min**  ·  PER Q  **{per_q}**  ·  {fmt}")
+
+
+def _g_block(title, color, bullets):
+    st.markdown(
+        f"<div style='display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem'>"
+        f"<span style='width:.6rem;height:.6rem;border-radius:2px;background:{color};display:inline-block'></span>"
+        f"<b>{title}</b></div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown("\n".join(f"- {b}" for b in bullets))
+
+
+def _g_example(color, q, a, trap=None):
+    st.markdown(
+        f"<div style='background:var(--paper-2,#FAFBF8);border:1px solid var(--line,#DBDFD6);"
+        f"border-left:4px solid {color};border-radius:0 10px 10px 0;padding:.9rem 1.05rem;margin:.4rem 0'>"
+        f"<div style='font-weight:600;margin-bottom:.4rem'>{q}</div>"
+        f"<div style='color:var(--ink-soft,#4C5651)'>{a}</div></div>",
+        unsafe_allow_html=True,
+    )
+    if trap:
+        st.markdown(
+            f"<div style='background:var(--coral-wash,#F6E6E1);border-radius:8px;padding:.5rem .9rem;"
+            f"font-size:.9rem;color:#8a3324;margin:.4rem 0 1.2rem'><b>⚠ Trap —</b> {trap}</div>",
+            unsafe_allow_html=True,
+        )
+
+
+def _g_subtest_tab(code, color, intro, what_tests, strategy_title, strategy, traps_title, traps, example):
+    st.caption(intro)
+    c1, c2 = st.columns(2)
+    with c1:
+        _g_block("What it tests", color, what_tests)
+        _g_block(strategy_title, color, strategy)
+    with c2:
+        _g_block(traps_title, color, traps)
+        _g_block("Worked micro-example", color, [])
+        _g_example(color, *example[:2], trap=example[2] if len(example) > 2 else None)
 
 
 def page_guide():
-    st.title("🧭 The UCAT Playbook")
-    st.caption("A complete strategy guide: format, scoring, per-subtest tactics, a study plan, and an interactive score checker.")
-    components.html(_load_guide_html(), height=900, scrolling=True)
+    vr_c = SUB_BY_NAME.get("Verbal Reasoning", {}).get("color", "#3B6488")
+    dm_c = SUB_BY_NAME.get("Decision Making", {}).get("color", "#6E5299")
+    qr_c = SUB_BY_NAME.get("Quantitative Reasoning", {}).get("color", "#12795C")
+    sjt_c = SUB_BY_NAME.get("Situational Judgement", {}).get("color", "#B06A2C")
+
+    st.markdown("<div style='font-family:var(--mono);font-size:.75rem;letter-spacing:.14em;"
+                "text-transform:uppercase;color:var(--teal)'>University Clinical Aptitude Test · 2025 / 2026 cycle</div>",
+                unsafe_allow_html=True)
+    st.title("Score in the top decile.")
+    st.markdown(
+        "The UCAT is not a knowledge test — it is a **speed and decision test**. Everyone sitting it can do the "
+        "maths and read the passage. The score gap is pace, technique, and nerve. This is the complete playbook "
+        "for closing it."
+    )
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Questions", "184")
+    c2.metric("Testing time", "111 min")
+    c3.metric("Subtests", "4")
+    c4.metric("Max score", "2700")
+
+    st.divider()
+
+    # ── 01 · Format ──────────────────────────────────────────────────────────
+    st.markdown("`01`")
+    st.header("The exam at a glance")
+    st.markdown(
+        "Four subtests, back to back, computer-based, at a Pearson VUE test centre. Abstract Reasoning was "
+        "removed for the 2025 cycle — the three cognitive subtests below are what build your out-of-2700 score. "
+        "Situational Judgement is scored separately as a band."
+    )
+    cols = st.columns(4)
+    with cols[0]:
+        _g_card("Verbal Reasoning", "Read fast, infer faster", vr_c, 44, 22, "~30 s", "11 passages")
+    with cols[1]:
+        _g_card("Decision Making", "Logic under a clock", dm_c, 35, 37, "~63 s", "Standalone")
+    with cols[2]:
+        _g_card("Quantitative Reasoning", "Applied numeracy", qr_c, 36, 26, "~43 s", "Data sets")
+    with cols[3]:
+        _g_card("Situational Judgement", "Think like a doctor", sjt_c, 69, 26, "~23 s", "Scenarios")
+
+    cols = st.columns(3)
+    cols[0].metric("Scaled per cognitive subtest", "300–900")
+    cols[1].metric("SJT outcome (1 = best)", "Band 1–4")
+    cols[2].metric("Wrong answers never cost you", "No −marking")
+    st.caption(
+        "On-screen basic calculator (QR only), a laminated noteboard and pen at your desk. A short instruction "
+        "screen precedes each subtest. There is no long scheduled break inside the 111 minutes — pace as one "
+        "continuous sitting."
+    )
+
+    st.divider()
+
+    # ── 02 · Scoring ─────────────────────────────────────────────────────────
+    st.markdown("`02`")
+    st.header("Scoring & what actually counts as good")
+    st.markdown(
+        "Raw marks in VR, DM and QR are converted to a scaled 300–900 each and summed to a total out of 2700. "
+        "Universities weight this differently — some use hard cut-offs, some rank, some combine it with grades — "
+        "so “good” is always relative to your target schools and this year's cohort."
+    )
+    st.dataframe(
+        pd.DataFrame([
+            {"2025 cohort": "Average", "Total score": "≈ 1891", "What it means": "Roughly 630 per subtest"},
+            {"2025 cohort": "5th decile (median)", "Total score": "1880", "What it means": "Middle of the pack"},
+            {"2025 cohort": "6th decile", "Total score": "1950", "What it means": "Above average"},
+            {"2025 cohort": "8th decile", "Total score": "2100", "What it means": "Top 20% — a strong, competitive score"},
+            {"2025 cohort": "Top few percent", "Total score": "2300+", "What it means": "Outstanding; opens the most selective courses"},
+        ]),
+        hide_index=True, width="stretch",
+    )
+    st.caption(
+        "2025 decile ladder: 1st 1580 · 2nd 1680 · 3rd 1760 · 4th 1820 · 5th 1880 · 6th 1950 · 8th 2100. "
+        "Boundaries drift a little each year, so treat these as guides, not guarantees."
+    )
+
+    st.markdown("#### The SJT band — don't neglect it")
+    st.dataframe(
+        pd.DataFrame([
+            {"Band": "1", "Standing": "Excellent", "Where it lands you": "Closest to the expert panel. Advantageous everywhere SJT is used."},
+            {"Band": "2", "Standing": "Good", "Where it lands you": "Most common outcome (~39% of candidates). Competitive at all schools."},
+            {"Band": "3", "Standing": "Modest", "Where it lands you": "Accepted by many, but a weakness where SJT is scored or ranked."},
+            {"Band": "4", "Standing": "Concerning", "Where it lands you": "~10% of candidates. Some schools will not consider Band 4 at all."},
+        ]),
+        hide_index=True, width="stretch",
+    )
+
+    with st.container(border=True):
+        st.markdown("#### Score checker")
+        st.caption("Drag your target scaled scores. The estimate shows roughly where that total sits in the 2025 cohort.")
+        c1, c2, c3 = st.columns(3)
+        vr_s = c1.slider("VR", 300, 900, 650, 10)
+        dm_s = c2.slider("DM", 300, 900, 650, 10)
+        qr_s = c3.slider("QR", 300, 900, 650, 10)
+        total = vr_s + dm_s + qr_s
+        pct = _score_percentile(total)
+        tier, desc = _score_tier(total)
+        frac = max(0.0, min(1.0, (total - 1500) / (2400 - 1500)))
+        st.progress(frac)
+        sc = st.columns(4)
+        for col, label in zip(sc, ["1580", "1880", "2100", "2340+"]):
+            col.caption(label)
+        m1, m2 = st.columns([1, 2])
+        m1.metric("Total / 2700", total)
+        with m2:
+            st.markdown(f"**{tier}**")
+            st.caption(f"{desc} ~{pct}th percentile.")
+        st.caption("Estimates from 2025 percentile data — a planning tool, not an official prediction.")
+
+    st.divider()
+
+    # ── 03-06 · Subtest deep dives ───────────────────────────────────────────
+    st.markdown("`03–06`")
+    st.header("Subtest deep dives")
+    tab_vr, tab_dm, tab_qr, tab_sjt = st.tabs(["📖 Verbal Reasoning", "🧩 Decision Making",
+                                                "🔢 Quantitative Reasoning", "🩺 Situational Judgement"])
+    with tab_vr:
+        _g_subtest_tab(
+            "VR", vr_c,
+            "Eleven passages, four questions each, and only half a minute per question. You cannot read every "
+            "word — VR is a test of controlled skimming and disciplined logic, judged only on what the passage says.",
+            what_tests=[
+                "Comprehension and inference from dense, often dull text (science, history, policy).",
+                "Separating what is **stated** from what is merely plausible or true in the real world.",
+                "**Two question types:** True/False/Can't Tell statements, and free-text inference (\"the author would most agree…\").",
+            ],
+            strategy_title="Strategy that moves the needle",
+            strategy=[
+                "**Question first, then hunt.** Read the statement, lift its keywords, scan the passage for them, decide. Don't pre-read the whole passage.",
+                "**Budget ~2 minutes per passage.** A stopwatch in your head beats a per-question one here.",
+                "**Decode Can't Tell:** if answering needs outside knowledge or an assumption the text never makes, it's Can't Tell, not True.",
+            ],
+            traps_title="Common traps",
+            traps=[
+                "**Absolute words** — \"all\", \"never\", \"only\", \"always\". One counter-example in the text makes them False.",
+                "**Your own knowledge.** If it's true in life but unstated in the passage, it isn't True here.",
+                "**Sinking** three minutes into one brutal passage. Flag it, guess, move.",
+            ],
+            example=(
+                "Passage: “The clinic opened a second site in 2019 to reduce waiting times.” Statement: <i>Waiting times fell after 2019.</i>",
+                "Answer: <b>Can't Tell.</b> The passage gives the intent (“to reduce”), never the outcome. Tempting as True — but nothing states times actually fell.",
+                "“Reduce” describes a goal, not a result. Reading purpose as fact is the #1 VR error.",
+            ),
+        )
+    with tab_dm:
+        _g_subtest_tab(
+            "DM", dm_c,
+            "The most time-generous subtest — over a minute per question — and the one that rewards careful, "
+            "structured reasoning over speed. Each question stands alone. Use the noteboard.",
+            what_tests=[
+                "Logical puzzles and deductions from a set of conditions.",
+                "Syllogisms — which conclusions **must** follow from given statements.",
+                "Venn diagrams and set interpretation.",
+                "Recognising assumptions and picking the **strongest argument**.",
+                "Probability and basic statistical reasoning.",
+                "**Scoring quirk:** some questions have five Yes/No statements — get all right for full marks, most right for partial, so grind these out.",
+            ],
+            strategy_title="Strategy that moves the needle",
+            strategy=[
+                "**Draw it.** Venn diagrams and logic grids on the noteboard beat holding it in your head.",
+                "**“Strongest argument”** = directly relevant + no logical flaw + addresses the actual question.",
+                "**Syllogisms:** accept only conclusions that are *necessarily* true, never just probable.",
+                "**Spend the time you're given.** This is where accuracy pays — don't rush what's deliberately paced.",
+            ],
+            traps_title="Common traps",
+            traps=[
+                "Treating a conclusion that **could** be true as one that **must** be true.",
+                "Picking the argument that “sounds” sensible instead of the one that's actually logically airtight.",
+                "Skipping the noteboard and trying to hold a 4-variable puzzle in your head.",
+            ],
+            example=(
+                "“All members of the team are qualified. Some qualified people are first-aiders.” Conclusion: <i>Some team members are first-aiders.</i>",
+                "Answer: <b>No.</b> The team are all qualified, but the qualified first-aiders needn't include any team member. It could be true — but it doesn't have to be.",
+                "“Could be true” ≠ “must be true”. DM only rewards necessity.",
+            ),
+        )
+    with tab_qr:
+        _g_subtest_tab(
+            "QR", qr_c,
+            "The maths is only GCSE-level — the difficulty is doing it accurately in 43 seconds while reading a "
+            "chart. Fluency with percentages and a fast hand on the on-screen calculator is worth more than any clever trick.",
+            what_tests=[
+                "Percentages, percentage change and **reverse** percentages.",
+                "Ratios, proportion and best-value comparisons.",
+                "Rates — speed/distance/time, unit conversion.",
+                "Reading data from tables, graphs and charts.",
+                "Area, volume and simple geometry.",
+                "**Calculator reality:** it's a basic four-function calculator you click — slow. Learn the number-key shortcuts.",
+            ],
+            strategy_title="Strategy that moves the needle",
+            strategy=[
+                "**Read the question before the data.** Only compute the one number asked — data sets bury a lot of decoys.",
+                "**Guard your units.** £/pence, km/m, per-week vs per-year — the trap is almost always a unit switch.",
+                "**Estimate to eliminate.** Ballpark first; if only one option is near, you may not need exact arithmetic.",
+                "**Flag the calculation-heavy ones** and clear the quick wins first.",
+            ],
+            traps_title="Common traps",
+            traps=[
+                "**Reverse percentages** — adding the % back on instead of dividing by the decimal multiplier.",
+                "Answering a different unit than the one asked for.",
+                "Doing simple arithmetic on the slow on-screen calculator instead of in your head.",
+            ],
+            example=(
+                "A jacket costs £48 after a 20% discount. What was the original price?",
+                "Answer: <b>£60.</b> £48 is 80% of the original, so original = 48 ÷ 0.8 = £60. Not £48 × 1.2 = £57.60 — that's the reverse-percentage trap.",
+                "Adding the % back on undershoots. Divide by the decimal multiplier instead.",
+            ),
+        )
+    with tab_sjt:
+        _g_subtest_tab(
+            "SJT", sjt_c,
+            "Scenarios from clinical and student life, judged against a panel of medical experts. It looks like "
+            "“common sense” — which is exactly why people under-prepare and land in Band 3. Learn the "
+            "examiner's value system and Band 1 is very reachable.",
+            what_tests=[
+                "Integrity, empathy, teamwork and coping under pressure — not medical knowledge.",
+                "How closely your judgement matches the professional consensus.",
+                "**Question types:** Appropriateness (very appropriate → very inappropriate), Importance (very important → not important at all), and Most/Least appropriate.",
+            ],
+            strategy_title="The examiner's value system",
+            strategy=[
+                "**Patient safety overrides everything.** If a patient is at risk, doing nothing is never appropriate.",
+                "**Never cover up** or ignore a mistake — honesty and probity always score.",
+                "**Escalate proportionately:** usually raise it with the person first, then go to a senior if needed.",
+                "**Stay within your competence** and seek help when out of your depth — that's a strength, not a failing.",
+                "**Be non-judgemental** and protect confidentiality.",
+            ],
+            traps_title="Common traps",
+            traps=[
+                "Choosing “do nothing” whenever patient safety is even slightly in question.",
+                "Jumping straight to reporting someone without first addressing it directly.",
+                "Prioritising a colleague's comfort or your own convenience over safety or honesty.",
+            ],
+            example=(
+                "A fellow student turns up to a hospital placement smelling of alcohol. Response: <i>“Say nothing to avoid embarrassing them.”</i>",
+                "Rating: <b>Very inappropriate.</b> Patient safety and professional standards outrank a colleague's comfort. The appropriate path is to raise it — with them, and if needed a supervisor.",
+                "Avoid the two extremes: never “ignore it”, but also rarely jump straight to reporting someone without first addressing it directly.",
+            ),
+        )
+
+    st.divider()
+
+    # ── 07 · Timing doctrine ─────────────────────────────────────────────────
+    st.markdown("`07`")
+    st.header("The interface & the timing doctrine")
+    st.markdown(
+        "More points are lost to the clock than to difficulty. The single biggest score lever for most "
+        "candidates is not knowing more — it's never leaving a question blank and never letting one question "
+        "eat the time of three."
+    )
+    cols = st.columns(3)
+    with cols[0]:
+        with st.container(border=True):
+            st.caption("RULE ONE")
+            st.markdown("**Answer everything**")
+            st.caption("No negative marking. A blank and a wrong answer score the same — so a guess can only "
+                        "help. In the last seconds of every subtest, fill all remaining answers with one "
+                        "“banker” letter.")
+    with cols[1]:
+        with st.container(border=True):
+            st.caption("RULE TWO")
+            st.markdown("**Flag & move**")
+            st.caption("Every subtest has a Flag button and a navigator. The moment a question runs long, flag "
+                        "it and go. Anchoring on one hard item is the classic way to run out of time with easy "
+                        "marks unanswered.")
+    with cols[2]:
+        with st.container(border=True):
+            st.caption("RULE THREE")
+            st.markdown("**Know your tools**")
+            st.caption("Calculator (QR only, number-key shortcuts), on-screen timer, flag/navigator, and a "
+                        "laminated noteboard + pen at your desk. Practise with these exact tools so exam day "
+                        "holds no surprises.")
+    st.info(
+        "**Your per-question pace, memorised.** VR ≈ 30 s · DM ≈ 60 s · QR ≈ 43 s · SJT ≈ 23 s. You won't watch "
+        "the clock every question — but you should *feel* when you've overstayed. Internalise these four "
+        "numbers and “flag & move” becomes automatic."
+    )
+
+    st.divider()
+
+    # ── 08 · Preparation plan ────────────────────────────────────────────────
+    st.markdown("`08`")
+    st.header("The preparation plan")
+    st.markdown(
+        "Six to eight focused weeks beats months of drift. The pattern that works: learn the technique first, "
+        "drill weaknesses second, then live almost entirely inside full timed mocks. Review is where the score "
+        "is made — analysing *why* each answer was wrong is worth more than doing another hundred questions."
+    )
+    phases = [
+        ("Weeks 1–2 · Foundations", "Learn the game before playing it",
+         "Sit one diagnostic to find your weak subtest. Learn the format and the strategy for each section "
+         "(this guide). Practise **untimed** — you're building correct method, not speed yet. Start daily "
+         "mental-maths and speed-reading warm-ups."),
+        ("Weeks 3–5 · Targeted drilling", "Attack your weaknesses, then add the clock",
+         "Drill by subtest and question type, hardest area first. Introduce timing gradually until you hit the "
+         "real per-question pace. Keep an error log — every mistake gets a one-line “why” so the same "
+         "trap never catches you twice."),
+        ("Weeks 6–8 · Full mocks", "Live under exam conditions",
+         "Two to three **full, timed mocks** a week, in one sitting, no phone, using the on-screen calculator "
+         "and noteboard. Review every mock in full. Save the **official UCAT practice tests** for last — "
+         "they're the truest calibration of where you'll land."),
+    ]
+    for i, (wk, title, body) in enumerate(phases, start=1):
+        c1, c2 = st.columns([1, 11])
+        c1.markdown(
+            f"<div style='width:2.2rem;height:2.2rem;border-radius:50%;background:var(--teal,#0C6B58);"
+            f"color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700'>{i}</div>",
+            unsafe_allow_html=True,
+        )
+        with c2:
+            st.caption(wk.upper())
+            st.markdown(f"**{title}**")
+            st.markdown(body)
+    st.warning(
+        "**The one habit that separates top scorers.** They review more than they grind. Doing 40 questions "
+        "and understanding all 40 mistakes beats doing 200 and glancing at the score. Volume without review "
+        "just rehearses your errors."
+    )
+
+    st.divider()
+
+    # ── 09 · Resources ───────────────────────────────────────────────────────
+    st.markdown("`09`")
+    st.header("Resources, ranked by usefulness")
+    st.markdown(
+        "Start with the free official material for accuracy, add a question bank for volume, and use timed "
+        "mocks to build stamina. Quality and realism matter far more than sheer quantity."
+    )
+    resources = [
+        ("FREE · OFFICIAL", "UCAT Consortium practice materials (ucat.ac.uk)",
+         "The most representative questions and the two official mock exams. The single best calibration tool "
+         "— do the full mocks near the end of your prep.", True),
+        ("FREE · THIS APP", "Your UCAT Prep question bank",
+         "A difficulty-calibrated, duplicate-free bank with per-user progress tracking and flashcards — use it "
+         "for daily drilling and to see accuracy by subtest.", True),
+        ("PAID · VOLUME", "Commercial question banks & mock platforms",
+         "Providers such as Medify, MedEntry, Pastest and others offer thousands of questions and timed mocks. "
+         "Useful for stamina — just don't mistake volume for progress.", False),
+        ("FREE · SKILLS", "Mental-maths & speed-reading drills",
+         "Times-tables, percentage and fraction fluency for QR; timed skim-reading for VR. Ten focused minutes "
+         "a day compounds fast.", False),
+    ]
+    for badge, title, body, free in resources:
+        badge_color = "var(--teal,#0C6B58)" if free else "var(--ink-faint,#78827C)"
+        with st.container(border=True):
+            c1, c2 = st.columns([1, 6])
+            c1.markdown(
+                f"<span style='font-family:var(--mono);font-size:.62rem;letter-spacing:.08em;font-weight:700;"
+                f"color:#fff;background:{badge_color};padding:.2rem .45rem;border-radius:5px;white-space:nowrap'>"
+                f"{badge}</span>", unsafe_allow_html=True,
+            )
+            with c2:
+                st.markdown(f"**{title}**")
+                st.caption(body)
+    st.caption(
+        "There are no “real past papers” — the UCAT is a non-disclosed exam, so no genuine past "
+        "questions exist anywhere. Anything advertised as leaked past papers is neither official nor reliable; "
+        "the official practice tests are as close as it gets."
+    )
+
+    st.divider()
+
+    # ── 10 · Exam day ────────────────────────────────────────────────────────
+    st.markdown("`10`")
+    st.header("Exam day")
+    st.markdown(
+        "By now the technique is built — the job is to protect it from nerves and logistics. Nothing on the "
+        "day should be a first-time experience."
+    )
+    c1, c2 = st.columns(2)
+    with c1:
+        _g_block("Before you go", "#0C6B58", [
+            "Sleep properly the night before — cramming past midnight costs more than it adds.",
+            "Bring the **correct photo ID**; check the test-centre rules the day before.",
+            "Eat something steady and hydrate; arrive early to settle your nerves.",
+        ])
+        _g_block("Keeping nerves in check", "#0C6B58", [
+            "Slow breathing between subtests resets a racing mind faster than re-reading a question.",
+            "You've rehearsed this exact format — the day is just another mock with higher stakes.",
+        ])
+    with c2:
+        _g_block("During the test", "#0C6B58", [
+            "Work one subtest at a time. A rough section is not the exam — reset and move on.",
+            "Trust your pace and your “flag & move” reflex; don't renegotiate strategy mid-exam.",
+            "Always spend the final seconds of each subtest filling every blank.",
+        ])
+        _g_block("Perspective", "#0C6B58", [
+            "The UCAT is one part of your application, alongside grades, personal statement and interview.",
+            "Different schools weight it differently — a strong score opens doors, but it isn't the whole decision.",
+        ])
+
+    st.divider()
+
+    # ── 11 · Mindset ─────────────────────────────────────────────────────────
+    st.markdown("`11`")
+    st.header("The eleven commandments")
+    st.markdown("Everything above, distilled. If you internalise nothing else, internalise these.")
+    commandments = [
+        "**Never leave a blank.** No negative marking means a guess is free upside.",
+        "**Flag and move** the instant a question runs long. Protect the easy marks.",
+        "**Answer only what's asked** — in VR and QR the data is full of decoys.",
+        "**“Can't Tell” is a real answer.** If the passage doesn't say it, don't infer it.",
+        "**Must, not might.** DM rewards necessity, never mere possibility.",
+        "**Divide, don't add back** for reverse percentages.",
+        "**Patient safety first** in every SJT scenario; never do nothing.",
+        "**Review beats volume.** Understand every mistake before doing more.",
+        "**Live in full timed mocks** for the final stretch.",
+        "**Save the official tests** for your truest calibration near the end.",
+        "**It's one part of the application.** Prepare hard, then keep it in perspective.",
+    ]
+    c1, c2 = st.columns(2)
+    half = (len(commandments) + 1) // 2
+    for col, chunk, start in ((c1, commandments[:half], 1), (c2, commandments[half:], half + 1)):
+        with col:
+            for i, item in enumerate(chunk, start=start):
+                st.markdown(f"**{i:02d}.** {item}")
+
+    st.caption(
+        "Figures reflect the 2025 / 2026 test cycle (Abstract Reasoning removed; scored out of 2700). Data: "
+        "UCAT Consortium test-format & statistics, 2025. Always confirm the current year's format and your "
+        "universities' requirements at [ucat.ac.uk](https://www.ucat.ac.uk)."
+    )
 
 
 # ════════════════════════════════════════════════════════════════════════════
