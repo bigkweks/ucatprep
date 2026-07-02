@@ -940,6 +940,27 @@ def get_attempts_over_time(user_id, days=30):
         _close(conn)
 
 
+def get_daily_pace(user_id, days=30):
+    """Per day, per subject: attempts and total time spent, timed answers only.
+
+    Zero-second entries (e.g. answers recorded before per-question timing was
+    tracked) are excluded so they can't drag a historic average down to 0."""
+    ph = _ph()
+    start = (date.today() - timedelta(days=days)).isoformat()
+    conn = get_conn()
+    try:
+        return _q(conn, f"""
+            SELECT substr(a.created_at, 1, 10) AS day, s.code AS code,
+                   COUNT(*) AS attempts, SUM(a.seconds) AS total_seconds
+            FROM attempts a JOIN subjects s ON s.id = a.subject_id
+            WHERE a.user_id = {ph} AND a.created_at >= {ph} AND a.seconds > 0
+            GROUP BY substr(a.created_at, 1, 10), s.code
+            ORDER BY day
+        """, (user_id, start))
+    finally:
+        _close(conn)
+
+
 def get_overall_stats(user_id):
     ph = _ph()
     conn = get_conn()
