@@ -2344,7 +2344,8 @@ _PASSAGE_SETS = [
      "Europe. This dependence carried a risk that became tragically clear when a fungal blight destroyed "
      "successive harvests in the 1840s.",
      [
-         ("Which of the following best expresses the main idea of the passage?",
+         ("Which of the following best expresses the main idea of the passage on the potato's journey to "
+          "Europe?",
           "The potato's rise from a distrusted curiosity to a European staple was gradual and driven by "
           "its practical advantages",
           "The potato was accepted enthusiastically as soon as it arrived in Europe",
@@ -2747,6 +2748,342 @@ _PASSAGE_SETS = [
           "Very important", "Important", "Of minor importance", "Not important at all", "A",
           "The duty to protect patients and to raise concerns applies to students too; recognising that "
           "duty is very important to deciding she should act.", "Hard"),
+     ]),
+
+    ("VR", "True / False / Can't Tell",
+     "The Domestication of the Horse",
+     "Genetic and archaeological evidence increasingly points to the western Eurasian steppe, in the "
+     "region of modern Kazakhstan, as the area where horses were first domesticated, sometime around "
+     "3500 BCE. Early domestication is thought to have been for meat and milk rather than for riding, "
+     "since the skeletal changes associated with sustained riding — wear patterns on the teeth from a "
+     "bit, and changes to the spine from a rider's weight — appear later in the archaeological record "
+     "than the earliest signs of human management. Genetic studies of modern horses show remarkably low "
+     "diversity in the chromosome inherited only through the male line, suggesting that a small number of "
+     "stallions, prized for particular traits, were used to sire the vast majority of domestic horses "
+     "across many later populations, even as the mitochondrial DNA passed down the female line remains "
+     "highly diverse. This pattern implies that many wild mares from different regions were incorporated "
+     "into domestic herds over time, while stallions were far more tightly selected. The domestication of "
+     "the horse transformed warfare, transport and agriculture across Eurasia, allowing armies, traders "
+     "and herders to travel distances and speeds that would previously have been impossible. Some "
+     "researchers caution, however, that a single steppe origin does not preclude horses being "
+     "independently tamed, on a smaller and less lasting scale, in other regions before or after the "
+     "steppe domestication took hold.",
+     [
+         ("Statement: The earliest domesticated horses were used mainly for riding. "
+          "Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "", "B",
+          "The passage says early domestication 'was for meat and milk rather than for riding' — the "
+          "statement is contradicted, making it False.", "Easy"),
+         ("Statement: The chromosome inherited only through the male line shows low genetic diversity in "
+          "modern domestic horses. Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "", "A",
+          "This is stated directly: 'remarkably low diversity in the chromosome inherited only through "
+          "the male line'.", "Easy"),
+         ("Which statement is best supported by the passage on horse domestication?",
+          "All domestic horses today are directly descended from wild herds independently tamed on every "
+          "continent",
+          "Riding-related skeletal changes appear earlier in the record than the earliest signs of human "
+          "management",
+          "A relatively small number of stallions contributed disproportionately to later domestic horse "
+          "populations",
+          "Mitochondrial DNA passed down the female line shows very low diversity", "C",
+          "The passage says a small number of prized stallions sired 'the vast majority of domestic "
+          "horses'. A overreaches; B reverses the stated order (riding changes appear later); and D "
+          "contradicts the passage, which says female-line DNA 'remains highly diverse'.", "Medium"),
+         ("Statement: Horses were definitely tamed independently, outside the steppe region, at some "
+          "point before or after 3500 BCE. Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "", "C",
+          "The passage says this possibility is not 'precluded' by the single-origin evidence — a caution "
+          "about interpretation, not a confirmed fact. Whether it actually happened is never stated, so "
+          "there isn't enough information to judge — Can't tell.", "Hard"),
+     ]),
+
+    ("VR", "Inference & Author Tone",
+     "Confirmation Bias in Clinical Diagnosis",
+     "Confirmation bias — the tendency to notice and weigh evidence that supports a belief already held, "
+     "while discounting evidence that contradicts it — has been repeatedly identified as a contributor to "
+     "diagnostic error in medicine. A clinician who forms an early impression of a patient's condition may "
+     "unconsciously seek out findings consistent with that impression and interpret ambiguous signs in its "
+     "favour, while overlooking details that would point elsewhere. This tendency is thought to be "
+     "reinforced by time pressure, since a fuller, more even-handed review of every possible diagnosis "
+     "takes longer than confirming a hypothesis that already feels plausible. Studies asking clinicians to "
+     "diagnose written case vignettes have found that providing an initial, plausible-but-wrong suggestion "
+     "— for instance, a preceding clinician's tentative diagnosis — measurably reduces the rate at which "
+     "the correct diagnosis is subsequently reached, even though participants were free to disregard the "
+     "suggestion entirely. Proposed remedies include structured checklists that prompt a clinician to "
+     "actively consider alternative diagnoses before settling on one, and deliberately seeking a "
+     "colleague's independent opinion before it can be anchored by an existing suggestion. Critics of "
+     "these remedies note that checklists and second opinions take time that busy clinical services often "
+     "do not have, and that experienced clinicians perform this checking intuitively without a formal "
+     "tool — though evidence for this claim of automatic self-correction is described in the literature "
+     "as mixed at best.",
+     [
+         ("Which of the following best expresses the main idea of the passage on confirmation bias in "
+          "clinical diagnosis?",
+          "Confirmation bias is entirely eliminated by clinical experience",
+          "Confirmation bias contributes to diagnostic error, and while structured remedies exist, they "
+          "carry real practical costs",
+          "Checklists have been proven to have no effect on diagnostic accuracy",
+          "Time pressure has no relationship to diagnostic error", "B",
+          "The passage links confirmation bias to diagnostic error and describes remedies (checklists, "
+          "second opinions) alongside their practical costs (time). A and D are directly contradicted; C "
+          "is never claimed.", "Medium"),
+         ("Statement: Time pressure has been shown to have no effect on diagnostic error. "
+          "Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "", "B",
+          "The passage says confirmation bias's contribution to error 'is thought to be reinforced by "
+          "time pressure' — the statement is contradicted, making it False.", "Easy"),
+         ("How does the author characterise the evidence that experienced clinicians correct for "
+          "confirmation bias automatically, without a formal tool?",
+          "Overwhelmingly strong", "Completely absent", "Universally accepted by researchers",
+          "Mixed at best — not strongly supported", "D",
+          "The passage states this evidence 'is described in the literature as mixed at best'.", "Medium"),
+         ("Which conclusion is best supported by the passage?",
+          "Time pressure may discourage clinicians from fully reviewing alternative diagnoses",
+          "Checklists are always faster than intuitive judgement",
+          "All diagnostic errors stem from confirmation bias",
+          "Second opinions are never influenced by a prior suggestion", "A",
+          "The passage says a fuller review 'takes longer' than confirming a plausible hypothesis under "
+          "time pressure. B is contradicted (checklists take time); C and D overreach beyond what the "
+          "passage supports.", "Hard"),
+     ]),
+
+    ("VR", "Reading for the Main Idea",
+     "The Discovery of Penicillin",
+     "In 1928, Alexander Fleming returned to his London laboratory after a summer holiday to find that "
+     "one of the culture plates he had left out, intended to grow the bacterium Staphylococcus, had "
+     "become contaminated with a mould. Around the mould, the bacteria had failed to grow, leaving a "
+     "clear ring in an otherwise cloudy plate. Fleming identified the mould as a Penicillium species and "
+     "published his observation, noting the antibacterial substance's potential, which he termed "
+     "penicillin. He struggled, however, to purify or produce the substance in usable quantities, and for "
+     "over a decade the discovery remained a laboratory curiosity rather than a treatment. It was not "
+     "until the late 1930s that a team at Oxford, led by Howard Florey and Ernst Chain, developed methods "
+     "to extract and concentrate penicillin and to test it systematically in animals and then in a small "
+     "number of human patients. Wartime demand accelerated the search for mass-production methods, and "
+     "pharmaceutical manufacturing techniques developed largely in the United States allowed penicillin "
+     "to be produced at a scale sufficient to treat large numbers of Allied soldiers by the mid-1940s. "
+     "Fleming, Florey and Chain shared the 1945 Nobel Prize in Physiology or Medicine for the discovery. "
+     "Popular accounts sometimes credit Fleming alone with penicillin's success as a medicine, but the "
+     "passage's evidence suggests that his initial observation, though essential, was only the first of "
+     "several steps — each requiring different expertise — that were necessary before penicillin could "
+     "save lives.",
+     [
+         ("Which of the following best expresses the main idea of the passage on the discovery of "
+          "penicillin?",
+          "Fleming alone was responsible for penicillin becoming a usable medicine",
+          "Penicillin was never successfully mass-produced",
+          "Turning Fleming's initial observation into a usable medicine required further, separate "
+          "contributions from other researchers",
+          "Florey and Chain discovered penicillin independently of Fleming, before his 1928 observation",
+          "C",
+          "The closing sentence states Fleming's observation 'was only the first of several steps ... "
+          "necessary before penicillin could save lives'. A is contradicted; B is contradicted by the "
+          "account of wartime mass production; D reverses the actual chronology.", "Medium"),
+         ("Statement: Fleming was the first person anywhere to notice that a mould could inhibit "
+          "bacterial growth. Based only on the passage, this statement is:",
+          "True", "False", "Can't tell", "", "C",
+          "The passage describes Fleming's own observation and its consequences but never claims he was "
+          "the first person ever, anywhere, to notice such an effect — there isn't enough information to "
+          "judge that broader claim. Can't tell.", "Hard"),
+         ("According to the passage, what accelerated the development of methods to mass-produce "
+          "penicillin?",
+          "Wartime demand", "A shortage of Penicillium mould", "Fleming's personal request",
+          "A decline in bacterial infections", "A",
+          "Stated directly: 'wartime demand accelerated the search for mass-production methods'.",
+          "Easy"),
+         ("The author's attitude towards the popular account crediting Fleming alone is best described "
+          "as:",
+          "Fully in agreement", "Indifferent", "Unaware such accounts exist",
+          "Sceptical — the passage's evidence suggests this account is incomplete", "D",
+          "The final sentence explicitly frames the 'Fleming alone' account against evidence that further, "
+          "separate contributions were 'necessary' — a sceptical framing of the popular version.",
+          "Medium"),
+     ]),
+
+    ("QR", "Tables, Charts & Data",
+     "Hospital Bed Occupancy",
+     "A hospital records the total and occupied beds on four wards:\n\n"
+     "| Ward | Total beds | Occupied beds |\n"
+     "|---|---|---|\n"
+     "| A | 40 | 34 |\n"
+     "| B | 25 | 20 |\n"
+     "| C | 60 | 51 |\n"
+     "| D | 30 | 18 |\n\n"
+     "Use the table to answer the questions.",
+     [
+         ("What percentage of Ward C's beds are occupied?",
+          "80%", "90%", "85%", "75%", "82%", "C",
+          "51 ÷ 60 = 0.85 = 85%.", "Easy"),
+         ("How many beds in total are unoccupied across all four wards?",
+          "32", "30", "28", "35", "26", "A",
+          "Total beds = 40+25+60+30 = 155; occupied = 34+20+51+18 = 123; unoccupied = 155 − 123 = 32.",
+          "Medium"),
+         ("Which ward has the lowest occupancy rate (occupied ÷ total)?",
+          "Ward A", "Ward B", "Ward C", "Ward D", "They are all equal", "D",
+          "Rates: A 34/40=85%, B 20/25=80%, C 51/60=85%, D 18/30=60%. Ward D is lowest.", "Medium"),
+         ("If Ward D's occupied beds increase by 50%, how many beds will be occupied, and will this "
+          "exceed Ward D's total capacity of 30?",
+          "24 beds; within capacity", "27 beds; still within capacity", "27 beds; exceeds capacity",
+          "30 beds; exactly at capacity", "9 beds; within capacity", "B",
+          "18 × 1.5 = 27 beds, which is still below Ward D's 30-bed capacity.", "Hard"),
+     ]),
+
+    ("QR", "Ratios & Proportion",
+     "A Pharmacy Stock Take",
+     "A pharmacy dilutes a 20% stock saline solution with water in the ratio 3:2 (stock:water) to produce "
+     "its standard working solution.",
+     [
+         ("What is the concentration of the working solution?",
+          "15%", "12%", "10%", "8%", "6%", "B",
+          "The stock makes up 3/5 of the mixture, so concentration = 20% × 3/5 = 12%.", "Medium"),
+         ("To produce 20 litres of the working solution, how many litres of the 20% stock solution are "
+          "needed?",
+          "15", "10", "8", "12", "6", "D",
+          "Stock is 3/5 of the mixture: 3/5 × 20 = 12 litres.", "Medium"),
+         ("The pharmacy has only 9 litres of stock solution left. What is the maximum volume of working "
+          "solution it can produce, keeping the 3:2 ratio?",
+          "15", "18", "12", "9", "21", "A",
+          "9 litres of stock is 3 parts, so 1 part = 3 litres; water = 2 × 3 = 6 litres; "
+          "total = 9 + 6 = 15 litres.", "Hard"),
+         ("If the ratio were changed to 2:3 (stock:water) instead, what would the new concentration be?",
+          "10%", "12%", "8%", "6%", "5%", "C",
+          "Stock is now 2/5 of the mixture: 20% × 2/5 = 8%.", "Medium"),
+     ]),
+
+    ("QR", "Speed, Distance & Time",
+     "Marathon Split Times",
+     "A runner completes a 42.2 km marathon with the following splits:\n\n"
+     "| Segment | Distance | Time |\n"
+     "|---|---|---|\n"
+     "| 0–10 km | 10.0 km | 42 min |\n"
+     "| 10–21.1 km | 11.1 km | 48 min |\n"
+     "| 21.1–32 km | 10.9 km | 50 min |\n"
+     "| 32–42.2 km | 10.1 km | 55 min |\n\n"
+     "Use the table to answer the questions.",
+     [
+         ("What was the runner's total marathon time?",
+          "3 h 15 min", "3 h 05 min", "3 h 25 min", "3 h 10 min", "3 h 20 min", "A",
+          "42 + 48 + 50 + 55 = 195 minutes = 3 h 15 min.", "Easy"),
+         ("What was the average pace, in minutes per kilometre, for the 10–21.1 km segment?",
+          "~4.0 min/km", "~3.9 min/km", "~4.3 min/km", "~4.8 min/km", "~5.0 min/km", "C",
+          "48 min ÷ 11.1 km ≈ 4.3 min/km.", "Medium"),
+         ("What was the runner's average speed, in km/h, over the whole marathon?",
+          "12.0", "11.5", "14.0", "13.5", "13.0", "E",
+          "195 min = 3.25 h; 42.2 ÷ 3.25 ≈ 13.0 km/h.", "Hard"),
+         ("Which segment had the fastest average pace (lowest minutes per kilometre)?",
+          "32–42.2 km", "0–10 km", "21.1–32 km", "10–21.1 km", "All segments were equally fast", "B",
+          "Paces: 0–10 km = 4.2 min/km, 10–21.1 km ≈ 4.3, 21.1–32 km ≈ 4.6, 32–42.2 km ≈ 5.4. The first "
+          "segment is fastest.", "Medium"),
+     ]),
+
+    ("QR", "Tables, Charts & Data",
+     "University Applications",
+     "A university records applications, offers made, and places filled over four admissions cycles:\n\n"
+     "| Year | Applications | Offers made | Places filled |\n"
+     "|---|---|---|---|\n"
+     "| 2021 | 800 | 200 | 180 |\n"
+     "| 2022 | 900 | 220 | 200 |\n"
+     "| 2023 | 1000 | 250 | 210 |\n"
+     "| 2024 | 1100 | 260 | 230 |\n\n"
+     "Use the table to answer the questions.",
+     [
+         ("What was the offer rate (offers ÷ applications) in 2023?",
+          "20%", "22%", "28%", "25%", "24%", "D",
+          "250 ÷ 1000 = 25%.", "Easy"),
+         ("In which year was the ratio of places filled to offers made highest?",
+          "2021", "2022", "2023", "2024", "Equal in all years", "B",
+          "Ratios: 2021 180/200=0.900, 2022 200/220≈0.909, 2023 210/250=0.840, 2024 230/260≈0.885. "
+          "2022 is highest.", "Hard"),
+         ("Between 2021 and 2024, by what percentage did the number of applications increase?",
+          "37.5%", "30%", "35%", "40%", "33.3%", "A",
+          "(1100 − 800) ÷ 800 = 300 ÷ 800 = 37.5%.", "Medium"),
+         ("What was the mean number of offers made per year across all four years?",
+          "230", "225", "232.5", "235", "240", "C",
+          "(200+220+250+260) ÷ 4 = 930 ÷ 4 = 232.5.", "Medium"),
+     ]),
+
+    ("QR", "Ratios & Proportion",
+     "Currency Conversion for a Medical Elective",
+     "A student budgets for a medical elective abroad. The exchange rate is £1 = $1.25. A hotel costs "
+     "$150 per night; a flight costs £600.",
+     [
+         ("What is the cost of one night's hotel stay in £?",
+          "£125.00", "£115.00", "£135.00", "£120.00", "£187.50", "D",
+          "$150 ÷ 1.25 = £120.00.", "Easy"),
+         ("What is the total cost in £ of a 7-night hotel stay plus the flight?",
+          "£1,440", "£1,410", "£1,470", "£1,350", "£1,500", "A",
+          "7 × £120 = £840; £840 + £600 = £1,440.", "Medium"),
+         ("If the exchange rate changes to £1 = $1.20, how much more in £ would the same $150-per-night "
+          "hotel cost, compared with the original rate?",
+          "£3.75", "£5.00", "£6.25", "£2.50", "£4.50", "B",
+          "At the new rate: $150 ÷ 1.20 = £125.00; £125.00 − £120.00 = £5.00 more.", "Hard"),
+         ("The student has a total budget of £2,000 for the hotel and flight only. At the original "
+          "exchange rate, what is the maximum number of full nights they can afford after paying for the "
+          "flight?",
+          "10", "12", "9", "13", "11", "E",
+          "£2,000 − £600 (flight) = £1,400 remaining; £1,400 ÷ £120 ≈ 11.67, so 11 full nights.", "Hard"),
+     ]),
+
+    ("SJT", "Appropriateness Ratings",
+     "A Missed Consent Discussion",
+     "Tom, a medical student, is observing a surgical consent conversation. He notices that the surgeon "
+     "does not mention a recognised, moderately common risk of the procedure before the patient signs the "
+     "consent form. The patient later asks Tom, privately, whether there are any risks the surgeon didn't "
+     "mention. Rate the appropriateness of each of the following responses by Tom.",
+     [
+         ("How appropriate is it for Tom to tell the patient he cannot discuss the risks himself, and to "
+          "suggest she ask the surgeon or another member of the clinical team directly?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "A",
+          "This keeps Tom within his competence as a student while making sure the patient's question "
+          "reaches someone able to answer it accurately — a very appropriate response.", "Medium"),
+         ("How appropriate is it for Tom to tell the patient the specific risk he noticed was omitted, "
+          "based on his own knowledge?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "C",
+          "Disclosing risks is not a student's role, and a better channel exists (the clinical team); but "
+          "sharing a genuine, relevant concern is not itself dishonest or unsafe, so this is inappropriate "
+          "without being the worst response.", "Hard"),
+         ("How appropriate is it for Tom to raise the omission promptly and privately with the surgeon or "
+          "another senior member of the team after the conversation?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "A",
+          "Raising a patient-safety and informed-consent concern promptly and discreetly with someone "
+          "senior is exactly the professional response expected.", "Medium"),
+         ("How appropriate is it for Tom to say nothing to anyone, assuming the surgeon must have had a "
+          "good reason to omit the risk?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "D",
+          "Assuming a good reason without checking leaves a possible informed-consent gap unaddressed — a "
+          "very inappropriate response given patient safety is at stake.", "Hard"),
+     ]),
+
+    ("SJT", "Importance Ratings",
+     "A Struggling Colleague",
+     "Amara, a final-year medical student, notices that a fellow student on her placement, Chidi, has "
+     "seemed exhausted and has made two small but noticeable errors in patient notes over the past week. "
+     "Chidi confides that he has been struggling to sleep because of a family bereavement, and asks Amara "
+     "to keep it private. Amara is deciding whether and how to raise this. Rate how important each of the "
+     "following considerations is to her decision.",
+     [
+         ("How important is it for Amara to consider whether Chidi's errors could affect patient safety "
+          "if they continue unaddressed?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "A",
+          "Patient safety is paramount and directly at stake if tired-related errors continue.", "Medium"),
+         ("How important is it for Amara to consider that Chidi asked her, as a friend, to keep the "
+          "bereavement private?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "B",
+          "Respecting a colleague's trust and privacy matters, but it cannot override a genuine patient "
+          "safety concern — important, though not the overriding factor.", "Hard"),
+         ("How important is it for Amara to consider encouraging Chidi to speak to a supervisor or "
+          "student support service himself, rather than her reporting on his behalf?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "A",
+          "Supporting a colleague to seek help himself respects his autonomy while still addressing the "
+          "safety concern — a strongly preferred first step.", "Medium"),
+         ("How important is it for Amara to consider whether she personally likes Chidi?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "D",
+          "Personal feelings toward a colleague are irrelevant to a professional judgement about patient "
+          "safety and support.", "Easy"),
      ]),
 ]
 
