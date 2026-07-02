@@ -478,6 +478,19 @@ def verify_user(username: str, password: str):
         _close(conn)
 
 
+def set_password(user_id, new_password: str):
+    """Re-hash and store a new password for an existing account (fresh salt)."""
+    salt = secrets.token_hex(16)
+    ph = _ph()
+    conn = get_conn()
+    try:
+        _run(conn, f"UPDATE users SET password_hash = {ph}, salt = {ph} WHERE id = {ph}",
+             (_hash_password(new_password, salt), salt, user_id))
+        _commit(conn)
+    finally:
+        _close(conn)
+
+
 # ── Topics ─────────────────────────────────────────────────────────────────────
 
 def get_topics(subject_id=None, high_yield_only=False):

@@ -150,7 +150,7 @@ def _check_site_password() -> bool:
     col = st.columns([1, 2, 1])[1]
     with col:
         pw = st.text_input("Password", type="password", placeholder="Enter password", label_visibility="collapsed")
-        if st.button("Continue", type="primary", use_container_width=True):
+        if st.button("Continue", type="primary", width="stretch"):
             if pw == pwd:
                 st.session_state["_site_authenticated"] = True
                 st.rerun()
@@ -179,7 +179,7 @@ def _check_account() -> bool:
             with st.form("login_form"):
                 u = st.text_input("Username")
                 p = st.text_input("Password", type="password")
-                if st.form_submit_button("Sign in", type="primary", use_container_width=True):
+                if st.form_submit_button("Sign in", type="primary", width="stretch"):
                     user = db.verify_user(u, p) if u and p else None
                     if user:
                         st.session_state["user_id"] = user["id"]
@@ -192,7 +192,7 @@ def _check_account() -> bool:
                 u2 = st.text_input("Choose a username")
                 p2 = st.text_input("Choose a password", type="password")
                 p2b = st.text_input("Confirm password", type="password")
-                if st.form_submit_button("Create account", type="primary", use_container_width=True):
+                if st.form_submit_button("Create account", type="primary", width="stretch"):
                     if not u2 or not p2:
                         st.error("Enter a username and password.")
                     elif p2 != p2b:
@@ -328,7 +328,7 @@ def days_to_exam():
 with st.sidebar:
     st.markdown("## 🩺 UCAT Prep")
     st.caption(f"👤 Signed in as **{st.session_state.get('username', '')}**")
-    if st.button("Log out", use_container_width=True):
+    if st.button("Log out", width="stretch"):
         for k in list(st.session_state.keys()):
             del st.session_state[k]
         st.rerun()
@@ -407,7 +407,7 @@ def page_dashboard():
         ))
         fig.update_layout(yaxis_title="Accuracy (%)", yaxis_range=[0, 110],
                           height=340, margin=dict(t=10, b=10), plot_bgcolor="white")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
         # Readiness — weakest subtests
         ready = df[df["attempts"] > 0].sort_values("accuracy")
@@ -427,7 +427,7 @@ def page_dashboard():
             fig2.update_traces(line_color="#2E86C1")
             fig2.update_layout(height=280, margin=dict(t=10, b=10), plot_bgcolor="white",
                                yaxis_title="Questions", xaxis_title="")
-            st.plotly_chart(fig2, use_container_width=True)
+            st.plotly_chart(fig2, width="stretch")
         else:
             st.caption("No activity recorded in the last 30 days.")
     with colB:
@@ -437,7 +437,7 @@ def page_dashboard():
             fig3 = go.Figure(go.Pie(labels=qc["subject_name"], values=qc["questions"],
                                     marker_colors=qc["color"].tolist(), hole=0.45))
             fig3.update_layout(height=280, margin=dict(t=10, b=10), showlegend=True)
-            st.plotly_chart(fig3, use_container_width=True)
+            st.plotly_chart(fig3, width="stretch")
 
     # Upcoming tasks
     st.markdown("### 🗓️ Upcoming study tasks")
@@ -589,7 +589,7 @@ def page_flashcards():
     st.write("")
 
     if not ss.get("fc_show_back"):
-        if st.button("🔄 Show answer", type="primary", use_container_width=True):
+        if st.button("🔄 Show answer", type="primary", width="stretch"):
             ss["fc_show_back"] = True
             st.rerun()
     else:
@@ -597,7 +597,7 @@ def page_flashcards():
         cols = st.columns(4)
         ratings = [("😖 Again", 0), ("😬 Hard", 3), ("🙂 Good", 4), ("😎 Easy", 5)]
         for col, (lbl, quality) in zip(cols, ratings):
-            if col.button(lbl, key=f"fc_rate_{quality}", use_container_width=True):
+            if col.button(lbl, key=f"fc_rate_{quality}", width="stretch"):
                 db.review_flashcard(uid, card["id"], quality)
                 _invalidate_flashcard_progress_cache()
                 ss["fc_show_back"] = False
@@ -802,10 +802,33 @@ def page_tutor():
 def page_manage():
     st.title("⚙️ Manage")
     uid = st.session_state["user_id"]
-    tabs = st.tabs(["Exam date", "Questions", "Flashcards", "Topics"])
+    tabs = st.tabs(["Account", "Exam date", "Questions", "Flashcards", "Topics"])
+
+    # Account
+    with tabs[0]:
+        st.markdown(f"**Username:** {st.session_state.get('username', '')}")
+        st.caption("Passwords are stored as a salted hash — nobody, including us, can look up or "
+                   "display your current password. Set a new one below instead.")
+        st.divider()
+        st.markdown("**Change password**")
+        with st.form("change_pw", clear_on_submit=True):
+            cur_pw = st.text_input("Current password", type="password")
+            new_pw = st.text_input("New password", type="password")
+            new_pw2 = st.text_input("Confirm new password", type="password")
+            if st.form_submit_button("Update password", type="primary"):
+                user = db.verify_user(st.session_state["username"], cur_pw) if cur_pw else None
+                if not user:
+                    st.error("Current password is incorrect.")
+                elif not new_pw or len(new_pw) < 4:
+                    st.error("New password must be at least 4 characters.")
+                elif new_pw != new_pw2:
+                    st.error("New passwords don't match.")
+                else:
+                    db.set_password(uid, new_pw)
+                    st.success("Password updated.")
 
     # Exam date
-    with tabs[0]:
+    with tabs[1]:
         cur = db.get_context(uid, "exam_date")
         cur_d = date.fromisoformat(cur) if cur else date.today() + timedelta(days=90)
         new_d = st.date_input("UCAT exam date", value=cur_d)
@@ -815,7 +838,7 @@ def page_manage():
             st.rerun()
 
     # Questions
-    with tabs[1]:
+    with tabs[2]:
         with st.form("add_q", clear_on_submit=True):
             st.markdown("**Add a practice question**")
             sname = st.selectbox("Subtest", [s["name"] for s in SUBJECTS], key="mq_sub")
@@ -861,7 +884,7 @@ def page_manage():
                     st.rerun()
 
     # Flashcards
-    with tabs[2]:
+    with tabs[3]:
         with st.form("add_fc", clear_on_submit=True):
             st.markdown("**Add a flashcard**")
             sname = st.selectbox("Subtest", [s["name"] for s in SUBJECTS], key="mfc_sub")
@@ -894,7 +917,7 @@ def page_manage():
                     st.rerun()
 
     # Topics
-    with tabs[3]:
+    with tabs[4]:
         with st.form("add_topic", clear_on_submit=True):
             st.markdown("**Add a review topic**")
             sname = st.selectbox("Subtest", [s["name"] for s in SUBJECTS], key="mt_sub")
