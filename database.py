@@ -871,6 +871,50 @@ def _upsert_mistake(conn, user_id, question_id, is_correct):
              {"u": user_id, "q": question_id, "ca": now})
 
 
+def _upsert_mistakes_bulk(conn, user_id, results):
+    """Batch version of _upsert_mistake for record_attempts_bulk: one SELECT to
+    look up every existing mistakes row for this batch of questions (instead of
+    one per question), then per-row writes only where the state actually
+    changes — the common case of a correct answer to a question that was never
+    wrong needs no write at all, exactly as in the single-question version.
+    `results` is a list of (question_id, is_correct)."""
+    ph = _ph()
+    question_ids = list({qid for qid, _ in results})
+    if not question_ids:
+        return
+    marks = ",".join([ph] * len(question_ids))
+    existing = {r["question_id"]: r for r in
+                _q(conn, f"SELECT * FROM mistakes WHERE user_id = {ph} AND question_id IN ({marks})",
+                   tuple([user_id] + question_ids))}
+    now = datetime.now().isoformat()
+    to_insert = []
+    for question_id, is_correct in results:
+        ex = existing.get(question_id)
+        if is_correct:
+            if not ex:
+                continue
+            streak = ex["correct_streak"] + 1
+            newly_resolved = streak >= MISTAKE_CLEAR_STREAK
+            resolved_at = ex["resolved_at"] or (now if newly_resolved else None)
+            _run(conn, _n("""UPDATE mistakes SET correct_streak = :s, resolved = :r,
+                       last_seen_at = :ls, resolved_at = :ra WHERE user_id = :u AND question_id = :q"""),
+                 {"s": streak, "r": 1 if newly_resolved else 0, "ls": now, "ra": resolved_at,
+                  "u": user_id, "q": question_id})
+        elif ex:
+            _run(conn, _n("""UPDATE mistakes SET times_wrong = :tw, correct_streak = 0, resolved = 0,
+                       last_seen_at = :ls, resolved_at = NULL WHERE user_id = :u AND question_id = :q"""),
+                 {"tw": ex["times_wrong"] + 1, "ls": now, "u": user_id, "q": question_id})
+        else:
+            to_insert.append((question_id, now))
+    if to_insert:
+        values_sql = ", ".join(f"(:u{i}, :q{i}, 1, 0, 0, :ca{i}, :ca{i})" for i in range(len(to_insert)))
+        params = {}
+        for i, (qid, ca) in enumerate(to_insert):
+            params.update({f"u{i}": user_id, f"q{i}": qid, f"ca{i}": ca})
+        _run(conn, _n(f"""INSERT INTO mistakes (user_id, question_id, times_wrong, correct_streak,
+                   resolved, added_at, last_seen_at) VALUES {values_sql}"""), params)
+
+
 def record_attempt(user_id, question_id, subject_id, chosen, is_correct, seconds=0):
     conn = get_conn()
     try:
@@ -881,6 +925,36 @@ def record_attempt(user_id, question_id, subject_id, chosen, is_correct, seconds
                "is_correct": 1 if is_correct else 0, "seconds": seconds,
                "created_at": datetime.now().isoformat()})
         _upsert_mistake(conn, user_id, question_id, is_correct)
+        _commit(conn)
+    finally:
+        _close(conn)
+
+
+def record_attempts_bulk(user_id, attempts):
+    """Same end state as calling record_attempt once per item, but in a handful
+    of round trips instead of 3-per-question — used by the Mock Exam, which can
+    grade a hundred-plus questions in one go and was previously issuing that
+    many serial round trips against a remote Postgres connection on submit.
+    `attempts` is a list of (question_id, subject_id, chosen, is_correct, seconds);
+    assumes each question_id appears at most once (true for a single mock/quiz,
+    where every unit is drawn from the pool without repeats)."""
+    if not attempts:
+        return
+    conn = get_conn()
+    try:
+        now = datetime.now().isoformat()
+        values_sql = ", ".join(
+            f"(:u{i}, :q{i}, :s{i}, :c{i}, :ic{i}, :sec{i}, :ca{i})" for i in range(len(attempts))
+        )
+        params = {}
+        for i, (question_id, subject_id, chosen, is_correct, seconds) in enumerate(attempts):
+            params.update({f"u{i}": user_id, f"q{i}": question_id, f"s{i}": subject_id, f"c{i}": chosen,
+                            f"ic{i}": 1 if is_correct else 0, f"sec{i}": seconds, f"ca{i}": now})
+        _run(conn, _n(f"""
+            INSERT INTO attempts (user_id, question_id, subject_id, chosen, is_correct, seconds, created_at)
+            VALUES {values_sql}
+        """), params)
+        _upsert_mistakes_bulk(conn, user_id, [(qid, is_correct) for qid, sid, chosen, is_correct, seconds in attempts])
         _commit(conn)
     finally:
         _close(conn)
@@ -898,7 +972,13 @@ def get_mistakes(user_id, include_resolved=False):
                    WHERE m.user_id = {ph}"""
         if not include_resolved:
             sql += " AND m.resolved = 0"
-        sql += " ORDER BY m.resolved ASC, m.last_seen_at DESC"
+        # question_id as a final tiebreaker makes the order deterministic even
+        # when several rows share the same last_seen_at — which now happens
+        # routinely, since a Mock Exam records all its questions in one batch
+        # with a single shared timestamp (see record_attempts_bulk). Without
+        # this, Postgres (unlike SQLite) does not guarantee a stable order for
+        # tied rows, so re-running the same query could reorder them.
+        sql += " ORDER BY m.resolved ASC, m.last_seen_at DESC, m.question_id ASC"
         return _q(conn, sql, (user_id,))
     finally:
         _close(conn)
@@ -1300,33 +1380,36 @@ def get_leaderboard_mock_scores():
 
 
 def get_overall_stats(user_id):
-    ph = _ph()
+    """One dashboard-summary round trip instead of seven separate ones — each
+    field below was previously its own query on the same connection, which adds
+    up to real latency against a remote Postgres/Neon instance on every cache
+    miss. Scalar subqueries keep each count/sum independent (same semantics as
+    the original separate queries) while sharing a single network round trip."""
     conn = get_conn()
     try:
-        att = _q1(conn, f"SELECT COUNT(*) AS n, SUM(is_correct) AS correct FROM attempts WHERE user_id = {ph}",
-                  (user_id,)) or {}
-        cards = _q1(conn, "SELECT COUNT(*) AS n FROM flashcards") or {}
         today = date.today().isoformat()
-        due = _q1(conn, f"""
-            SELECT COUNT(*) AS n FROM flashcards f
-            LEFT JOIN flashcard_progress p ON p.flashcard_id = f.id AND p.user_id = {ph}
-            WHERE p.due_date IS NULL OR p.due_date <= {ph}
-        """, (user_id, today)) or {}
-        mastered = _q1(conn, f"SELECT COUNT(*) AS n FROM flashcard_progress WHERE user_id = {ph} AND reps >= 3",
-                       (user_id,)) or {}
-        tasks_done = _q1(conn, f"SELECT COUNT(*) AS n FROM study_tasks WHERE status = 'Done' AND user_id = {ph}",
-                         (user_id,)) or {}
-        tasks_total = _q1(conn, f"SELECT COUNT(*) AS n FROM study_tasks WHERE user_id = {ph}", (user_id,)) or {}
-        qs = _q1(conn, "SELECT COUNT(*) AS n FROM questions") or {}
+        row = _q1(conn, _n("""
+            SELECT
+                (SELECT COUNT(*) FROM attempts WHERE user_id = :uid) AS n,
+                (SELECT SUM(is_correct) FROM attempts WHERE user_id = :uid) AS correct,
+                (SELECT COUNT(*) FROM flashcards) AS cards,
+                (SELECT COUNT(*) FROM flashcards f
+                    LEFT JOIN flashcard_progress p ON p.flashcard_id = f.id AND p.user_id = :uid
+                    WHERE p.due_date IS NULL OR p.due_date <= :today) AS due,
+                (SELECT COUNT(*) FROM flashcard_progress WHERE user_id = :uid AND reps >= 3) AS mastered,
+                (SELECT COUNT(*) FROM study_tasks WHERE status = 'Done' AND user_id = :uid) AS tasks_done,
+                (SELECT COUNT(*) FROM study_tasks WHERE user_id = :uid) AS tasks_total,
+                (SELECT COUNT(*) FROM questions) AS qs
+        """), {"uid": user_id, "today": today}) or {}
         return {
-            "attempts": att.get("n") or 0,
-            "correct": att.get("correct") or 0,
-            "cards": cards.get("n") or 0,
-            "cards_due": due.get("n") or 0,
-            "cards_mastered": mastered.get("n") or 0,
-            "tasks_done": tasks_done.get("n") or 0,
-            "tasks_total": tasks_total.get("n") or 0,
-            "questions": qs.get("n") or 0,
+            "attempts": row.get("n") or 0,
+            "correct": row.get("correct") or 0,
+            "cards": row.get("cards") or 0,
+            "cards_due": row.get("due") or 0,
+            "cards_mastered": row.get("mastered") or 0,
+            "tasks_done": row.get("tasks_done") or 0,
+            "tasks_total": row.get("tasks_total") or 0,
+            "questions": row.get("qs") or 0,
         }
     finally:
         _close(conn)

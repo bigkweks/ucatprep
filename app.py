@@ -935,8 +935,8 @@ def page_mistakes():
     ss = st.session_state
     uid = ss["user_id"]
 
-    unresolved = cached_mistakes(uid, include_resolved=False)
     all_rows = cached_mistakes(uid, include_resolved=True)
+    unresolved = [m for m in all_rows if not m["resolved"]]
     resolved = [m for m in all_rows if m["resolved"]]
 
     c1, c2 = st.columns(2)
@@ -1906,11 +1906,12 @@ def _finish_mock(ss, elapsed):
     """Record every answered question to analytics once, then flip to the results screen."""
     if not ss.get("mock_graded"):
         times = ss.get("mock_times", {})
+        batch = []
         for i, q in enumerate(ss["mock"]):
             chosen = ss["mock_answers"].get(i)
             if chosen is not None:
-                db.record_attempt(ss["user_id"], q["id"], q["subject_id"], chosen, _is_correct(q, chosen),
-                                   times.get(i, 0))
+                batch.append((q["id"], q["subject_id"], chosen, _is_correct(q, chosen), times.get(i, 0)))
+        db.record_attempts_bulk(ss["user_id"], batch)
 
         rows = _mock_results(ss)
         total_q = sum(r["total"] for r in rows.values())
