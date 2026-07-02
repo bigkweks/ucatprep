@@ -660,6 +660,33 @@ def _passage_units(pool):
     return units
 
 
+def _mixed_unit_order(pool):
+    """Order a pool's units (see _passage_units) for a quiz, guaranteeing an even
+    mix across subtests instead of a flat shuffle. Decision Making's standalone
+    questions form far more, smaller units than VR/QR/SJT's passage sets — a
+    plain shuffle can fill an entire short 'All subtests' quiz with DM alone
+    before ever reaching a passage, purely because there are more small units to
+    draw from. Round-robining across subtests (each subtest's own units
+    independently shuffled, one drawn from each in a freshly-shuffled rotation
+    every pass) means every represented subtest appears before any one repeats,
+    so a short mixed quiz reliably samples the passage-based format too."""
+    units = _passage_units(pool)
+    by_subject: dict = {}
+    for u in units:
+        by_subject.setdefault(u[0]["subject_id"], []).append(u)
+    for lst in by_subject.values():
+        random.shuffle(lst)
+    remaining = list(by_subject.keys())
+    ordered = []
+    while remaining:
+        random.shuffle(remaining)
+        for sid in list(remaining):
+            ordered.append(by_subject[sid].pop(0))
+            if not by_subject[sid]:
+                remaining.remove(sid)
+    return ordered
+
+
 def _q_options(q):
     """Ordered {letter: text} for a question, skipping blank/absent options so
     each item shows exactly the number of choices its UCAT format uses — 3 for
@@ -759,11 +786,13 @@ def page_practice():
             n = st.number_input("Questions", 1, 50, 5, key="quiz_n")
         if st.button("▶️ Start quiz", type="primary"):
             pool = cached_questions(subject_id=sid, difficulty=difficulty)
-            # Keep passage sets intact and in order; shuffle whole units, then
-            # take units until we reach the requested count (a passage set may
-            # nudge the total slightly over rather than be cut in half).
-            units = _passage_units(pool)
-            random.shuffle(units)
+            # Keep passage sets intact and in order, and — when mixing subtests
+            # — round-robin across them so a short quiz reliably samples every
+            # subtest's format rather than being dominated by whichever one
+            # happens to have the most granular units. Then take units until
+            # reaching the requested count (a passage set may nudge the total
+            # slightly over rather than be cut in half).
+            units = _mixed_unit_order(pool)
             quiz: list = []
             for u in units:
                 if len(quiz) >= int(n):
