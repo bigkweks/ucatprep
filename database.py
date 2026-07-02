@@ -202,9 +202,10 @@ CREATE TABLE IF NOT EXISTS questions (
     option_c    TEXT NOT NULL,
     option_d    TEXT NOT NULL,
     option_e    TEXT,
-    correct     TEXT NOT NULL CHECK(correct IN ('A','B','C','D','E')),
+    correct     TEXT NOT NULL,
     explanation TEXT,
     difficulty  TEXT DEFAULT 'Medium' CHECK(difficulty IN ('Easy','Medium','Hard')),
+    question_format TEXT DEFAULT 'single' CHECK(question_format IN ('single','multi')),
     active      INTEGER DEFAULT 1,
     created_at  TEXT
 );
@@ -326,9 +327,10 @@ _PG_TABLES = [
         option_c    TEXT NOT NULL,
         option_d    TEXT NOT NULL,
         option_e    TEXT,
-        correct     TEXT NOT NULL CHECK(correct IN ('A','B','C','D','E')),
+        correct     TEXT NOT NULL,
         explanation TEXT,
         difficulty  TEXT DEFAULT 'Medium' CHECK(difficulty IN ('Easy','Medium','Hard')),
+        question_format TEXT DEFAULT 'single' CHECK(question_format IN ('single','multi')),
         active      INTEGER DEFAULT 1,
         created_at  TEXT
     )""",
@@ -455,11 +457,16 @@ def _migrate_passage_id(conn):
 
 
 def _migrate_question_options(conn):
-    """Bring the questions table up to the format the real UCAT needs:
-    a fifth option (option_e) for Quantitative Reasoning's five-choice items, an
+    """Bring the questions table up to the format the real UCAT needs: a fifth
+    option (option_e) for Quantitative Reasoning's five-choice items, and an
     `active` flag so legacy questions can be retired without deleting user
-    attempt history, and a widened `correct` CHECK that permits 'E'. Each step is
-    guarded so it is safe to re-run and safe on databases that predate it."""
+    attempt history. Each step is guarded so it is safe to re-run and safe on
+    databases that predate it. The `correct` column's CHECK constraint is
+    handled by _migrate_question_format, which runs after this and drops it
+    permanently — Decision Making's real 'Yes/No statements' format needs
+    `correct` to hold more than one letter (e.g. 'B,E'), so re-adding a
+    single-letter CHECK here would break on any database that already has
+    multi-format rows."""
     # option_e (nullable — most subtests use fewer than five options)
     if not _column_exists(conn, "questions", "option_e"):
         if _setup():
@@ -474,13 +481,24 @@ def _migrate_question_options(conn):
                 cur.execute("ALTER TABLE questions ADD COLUMN active INTEGER DEFAULT 1")
         else:
             conn.execute("ALTER TABLE questions ADD COLUMN active INTEGER DEFAULT 1")
-    # widen the correct-answer CHECK to allow 'E' (Postgres only — SQLite CHECKs
-    # live in the CREATE TABLE and fresh SQLite databases already include 'E')
+    _commit(conn)
+
+
+def _migrate_question_format(conn):
+    """Add question_format ('single' vs 'multi') and drop the single-letter CHECK
+    on `correct`, so Decision Making's real 'Yes/No statements' format — where a
+    question can have more than one correct letter, stored as a sorted
+    comma-separated string like 'B,E' — is representable. Guarded to be safe to
+    re-run and safe on databases that predate it."""
+    if not _column_exists(conn, "questions", "question_format"):
+        if _setup():
+            with conn.cursor() as cur:
+                cur.execute("ALTER TABLE questions ADD COLUMN question_format TEXT DEFAULT 'single'")
+        else:
+            conn.execute("ALTER TABLE questions ADD COLUMN question_format TEXT DEFAULT 'single'")
     if _setup():
         with conn.cursor() as cur:
             cur.execute("ALTER TABLE questions DROP CONSTRAINT IF EXISTS questions_correct_check")
-            cur.execute("ALTER TABLE questions ADD CONSTRAINT questions_correct_check "
-                        "CHECK (correct IN ('A','B','C','D','E'))")
     _commit(conn)
 
 
@@ -504,6 +522,7 @@ def init_db():
         _migrate_user_ids(conn)
         _migrate_passage_id(conn)
         _migrate_question_options(conn)
+        _migrate_question_format(conn)
     finally:
         _close(conn)
     seed_content()
@@ -3085,6 +3104,364 @@ _PASSAGE_SETS = [
           "Personal feelings toward a colleague are irrelevant to a professional judgement about patient "
           "safety and support.", "Easy"),
      ]),
+
+    ("SJT", "Appropriateness Ratings",
+     "Overheard Ward Gossip",
+     "Priya, a medical student, overhears two healthcare assistants discussing a patient's HIV status by "
+     "name in the hospital canteen, within earshot of other diners. Priya does not know either assistant "
+     "well. Rate the appropriateness of each of the following responses by Priya.",
+     [
+         ("How appropriate is it for Priya to politely point out, in the moment, that the conversation "
+          "risks breaching the patient's confidentiality?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "A",
+          "A prompt, polite reminder addresses the breach immediately and is well within any student's "
+          "responsibility to protect patient confidentiality.", "Medium"),
+         ("How appropriate is it for Priya to say nothing at the time, but later mention it to her "
+          "supervisor so the assistants' team can be made aware of the confidentiality concern?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "B",
+          "Raising it afterwards still addresses the concern, but a prompt in-the-moment reminder would "
+          "have been more effective at limiting the breach as it happened.", "Medium"),
+         ("How appropriate is it for Priya to repeat what she heard to a friend later that day, as an "
+          "interesting story?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "D",
+          "Repeating identifiable patient information further breaches confidentiality with no "
+          "professional justification — very inappropriate.", "Medium"),
+         ("How appropriate is it for Priya to ignore the conversation, reasoning that it is not her "
+          "patient and not her responsibility?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "C",
+          "Every member of a healthcare team shares responsibility for protecting patient confidentiality; "
+          "ignoring a clear breach is inappropriate, though it does not itself cause further harm the way "
+          "actively repeating the information would.", "Hard"),
+     ]),
+
+    ("SJT", "Appropriateness Ratings",
+     "A Senior's Error Left Uncorrected",
+     "James, a final-year student, witnesses a consultant prescribe a medication at a dose well above the "
+     "safe maximum. A senior nurse notices too, but is told by the consultant, dismissively, to \"just give "
+     "it, I know what I'm doing.\" The nurse administers the dose without further comment. Rate the "
+     "appropriateness of each of the following responses by James.",
+     [
+         ("How appropriate is it for James to raise the concern directly and immediately with the "
+          "consultant, clearly stating the dose appears to exceed the safe maximum?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "A",
+          "Patient safety is at immediate risk; raising the specific, factual concern right away is "
+          "exactly the expected response, regardless of the consultant's seniority.", "Medium"),
+         ("How appropriate is it for James to say nothing, assuming that since the nurse also noticed and "
+          "administered it anyway, the dose must actually be safe?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "D",
+          "Deferring silently to authority despite a clear, specific safety concern — especially when the "
+          "nurse's compliance may reflect the same pressure James is feeling — leaves the patient at risk. "
+          "Very inappropriate.", "Hard"),
+         ("How appropriate is it for James to check the dose against a reliable reference (e.g. the "
+          "British National Formulary) before deciding whether to raise it further?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "A",
+          "Verifying the concern against a trusted reference is a sensible, proportionate step that "
+          "supports raising it credibly and does not delay meaningfully.", "Medium"),
+         ("How appropriate is it for James, if dismissed again, to escalate the concern to another senior "
+          "clinician or the ward's clinical lead promptly?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "A",
+          "When an immediate safety concern is dismissed, escalating to another senior without delay is "
+          "the correct next step — patient safety overrides usual hierarchy.", "Medium"),
+         ("How appropriate is it for James to publicly confront the consultant in front of the patient and "
+          "other staff, insisting the dose be changed before he will let it be given?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "C",
+          "Raising the concern is right, but a public confrontation in front of the patient risks "
+          "undermining the patient's confidence in their care team and is not the most constructive way "
+          "to resolve it — better handled promptly but privately or through escalation.", "Hard"),
+     ]),
+
+    ("SJT", "Importance Ratings",
+     "Disagreeing With the Plan",
+     "Elin, a junior doctor, believes a senior colleague's proposed discharge plan for a patient is too "
+     "early given the patient's ongoing symptoms, but the senior colleague is confident and under time "
+     "pressure to free up the bed. Elin is deciding whether and how to raise her concern. Rate how "
+     "important each of the following considerations is to her decision.",
+     [
+         ("How important is it for Elin to consider whether the patient's ongoing symptoms could indicate "
+          "a genuine risk if discharged now?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "A",
+          "Patient safety is the central issue here and must be weighed above all else.", "Medium"),
+         ("How important is it for Elin to consider that the senior colleague is under pressure to free "
+          "up the bed?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "C",
+          "Bed pressure is a real operational factor but should not be allowed to override a genuine "
+          "safety concern — it is only of minor importance to Elin's decision.", "Medium"),
+         ("How important is it for Elin to raise her clinical concern with the senior colleague clearly, "
+          "even though it means disagreeing with someone more experienced?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "A",
+          "Raising a genuine patient-safety concern is essential, regardless of the seniority gap — "
+          "silence in the face of a real risk is not acceptable.", "Medium"),
+     ]),
+
+    ("SJT", "Appropriateness Ratings",
+     "Pressure to Adjust the Data",
+     "Marcus, a medical student on a research placement, is helping analyse data for a supervisor's study. "
+     "He notices that one data point looks like it may have been altered to better fit the expected "
+     "result. When he mentions it, the supervisor tells him not to worry about it and to move on. Rate the "
+     "appropriateness of each of the following responses by Marcus.",
+     [
+         ("How appropriate is it for Marcus to ask the supervisor directly for an explanation of how that "
+          "specific data point was obtained?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "A",
+          "Asking a direct, specific question about the data's origin is a reasonable and proportionate "
+          "first step before assuming wrongdoing.", "Medium"),
+         ("How appropriate is it for Marcus to drop the issue entirely, since the supervisor is more "
+          "senior and told him not to worry about it?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "D",
+          "Research integrity is a serious matter; dropping a genuine concern about altered data simply "
+          "because a supervisor dismissed it is very inappropriate.", "Hard"),
+         ("How appropriate is it for Marcus to raise the concern with the institution's research "
+          "integrity or ethics office if he remains unsatisfied after speaking with the supervisor?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "A",
+          "Escalating a genuine, unresolved research-integrity concern through the proper institutional "
+          "channel is exactly the correct next step.", "Medium"),
+         ("How appropriate is it for Marcus to publicly accuse the supervisor of fraud on social media?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "D",
+          "A public accusation without established proof, made outside any proper process, is unfair, "
+          "reckless, and very inappropriate — concerns should be raised through legitimate channels.",
+          "Medium"),
+     ]),
+
+    ("SJT", "Appropriateness Ratings",
+     "A Safeguarding Concern",
+     "During a paediatric placement, Fatima, a medical student, notices a child has several bruises in "
+     "unusual locations that don't match the explanation given by the accompanying parent. The supervising "
+     "doctor seems rushed and has not mentioned it. Rate the appropriateness of each of the following "
+     "responses by Fatima.",
+     [
+         ("How appropriate is it for Fatima to mention her observation to the supervising doctor promptly, "
+          "in a way that does not accuse the parent in front of the child?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "A",
+          "Raising a possible safeguarding concern promptly and discreetly with the responsible clinician "
+          "is exactly the right response — child safety takes priority.", "Medium"),
+         ("How appropriate is it for Fatima to say nothing, assuming the doctor must have already noticed "
+          "and decided it was nothing?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "D",
+          "Assuming safety has been handled, without confirming it, risks a genuine safeguarding issue "
+          "going unaddressed — very inappropriate given a child may be at risk.", "Hard"),
+         ("How appropriate is it for Fatima to directly question the parent about the bruises herself, on "
+          "the spot?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "C",
+          "As a student, directly interrogating a parent about a suspected safeguarding issue is outside "
+          "her role and could compromise a proper, sensitive assessment — better raised with the clinical "
+          "team first.", "Hard"),
+         ("How appropriate is it for Fatima to document exactly what she observed, factually and without "
+          "assumptions, for the clinical team's reference?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "A",
+          "Factual, non-judgemental documentation supports the clinical team's assessment and is good "
+          "practice when a safeguarding concern arises.", "Medium"),
+     ]),
+
+    ("SJT", "Importance Ratings",
+     "Overwhelmed and Behind",
+     "Daniel, a medical student, is juggling coursework deadlines with ward responsibilities and has "
+     "started to fall behind, missing a follow-up task he was asked to complete for a patient's care. He "
+     "is deciding how to handle the situation. Rate how important each of the following considerations is "
+     "to his decision.",
+     [
+         ("How important is it for Daniel to tell his supervisor promptly that the follow-up task was "
+          "missed, so it can still be completed or reassigned?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "A",
+          "Prompt disclosure ensures the patient-care gap is closed quickly — this is the priority.",
+          "Medium"),
+         ("How important is it for Daniel to consider that admitting the mistake might make him look "
+          "less capable in front of his supervisor?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "D",
+          "Concern for his own reputation is not a legitimate reason to delay disclosing a patient-care "
+          "gap — it is not important at all to the decision.", "Medium"),
+         ("How important is it for Daniel to reflect on how he is managing his overall workload, so "
+          "similar gaps are less likely in future?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "B",
+          "Reflecting on workload management is a sensible, important step for preventing recurrence, "
+          "though it is secondary to fixing the immediate gap.", "Medium"),
+     ]),
+
+    ("SJT", "Appropriateness Ratings",
+     "A Patient's Request for a Different Doctor",
+     "A patient asks to be seen by a different doctor because of the current doctor's ethnicity, stating "
+     "they would feel more comfortable with someone else. The current doctor is competent and has no "
+     "clinical reason to hand over care. Rate the appropriateness of each of the following responses from "
+     "the clinical team.",
+     [
+         ("How appropriate is it for the team to calmly explain that the request cannot be accommodated on "
+          "the stated grounds, while checking whether there is a genuine clinical or communication reason "
+          "behind the request?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "A",
+          "This addresses the discriminatory basis directly while remaining open to a legitimate "
+          "underlying concern — a balanced, professional response.", "Hard"),
+         ("How appropriate is it for the team to simply reassign the patient to a different doctor to "
+          "avoid conflict, without addressing the reason given?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "C",
+          "Accommodating a discriminatory request without comment avoids immediate friction but "
+          "implicitly endorses discrimination against a colleague — inappropriate, though not the most "
+          "harmful option available.", "Hard"),
+         ("How appropriate is it for the team to refuse the request and directly criticise the patient for "
+          "being discriminatory?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "D",
+          "Confronting a patient with direct personal criticism is unprofessional and could damage the "
+          "therapeutic relationship — very inappropriate, even though the underlying request is "
+          "unacceptable.", "Hard"),
+         ("How appropriate is it for the team to support the current doctor by making clear that patient "
+          "care decisions are not made on the basis of a clinician's ethnicity, while managing the "
+          "immediate situation professionally?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "A",
+          "Upholding the principle clearly, without discriminating against the treating doctor, while "
+          "still handling the immediate encounter professionally, is exactly right.", "Medium"),
+         ("How appropriate is it for the team to ignore the request entirely and proceed as though it was "
+          "never made?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "C",
+          "Ignoring the request avoids confrontation but leaves both the patient's underlying concern and "
+          "the discriminatory basis unaddressed — inappropriate, though not actively harmful.", "Hard"),
+     ]),
+
+    ("SJT", "Appropriateness Ratings",
+     "A Grateful Patient's Gift",
+     "After a successful course of treatment, a patient tries to give Aisha, her student doctor, an "
+     "expensive bottle of whisky as a personal thank-you gift. Rate the appropriateness of each of the "
+     "following responses by Aisha.",
+     [
+         ("How appropriate is it for Aisha to politely decline the gift, explaining that she isn't able to "
+          "accept gifts of significant value, while thanking the patient warmly for the gesture?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "A",
+          "This respects the patient's kind intentions while maintaining an appropriate professional "
+          "boundary around gifts of significant value.", "Medium"),
+         ("How appropriate is it for Aisha to accept the gift privately and not mention it to anyone?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "C",
+          "Accepting a gift of significant value without transparency risks perceptions of undue "
+          "influence, even where none was intended — inappropriate, though not itself dishonest or unsafe.",
+          "Hard"),
+         ("How appropriate is it for Aisha to accept the gift but declare it to her supervisor or through "
+          "her institution's gifts policy?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "B",
+          "Declaring the gift maintains transparency, though many institutions' policies would still "
+          "prefer such a gift be declined rather than accepted and logged.", "Medium"),
+     ]),
+
+    ("SJT", "Importance Ratings",
+     "A Regrettable Social Media Post",
+     "Yusuf, a medical student, posted a photo from a night out that shows him visibly intoxicated, "
+     "tagged with the name of his hospital placement. A friend points out that the post is public and "
+     "could be seen by patients or supervisors. Rate how important each of the following considerations "
+     "is to Yusuf's decision about what to do next.",
+     [
+         ("How important is it for Yusuf to consider that the post links his behaviour to his hospital "
+          "placement and the medical profession?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "A",
+          "Public association between personal conduct and a professional placement is the central "
+          "concern — it can affect trust in the profession, not just Yusuf personally.", "Medium"),
+         ("How important is it for Yusuf to consider removing or restricting the post promptly?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "A",
+          "Prompt action limits any reputational or professional impact — this is a very important, "
+          "practical first step.", "Easy"),
+         ("How important is it for Yusuf to consider how many 'likes' the post received?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "D",
+          "Engagement metrics are irrelevant to the professionalism concern at hand.", "Easy"),
+         ("How important is it for Yusuf to consider being more mindful of what he posts publicly while "
+          "he is a student on placement?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "B",
+          "Building better judgement about public posting is a sensible, important habit going forward, "
+          "though secondary to addressing this specific post.", "Medium"),
+     ]),
+
+    ("SJT", "Appropriateness Ratings",
+     "Copied Coursework Data",
+     "Leah, a medical student, discovers that a coursemate's submitted lab report contains data that "
+     "appears identical to her own, down to identical incidental errors, suggesting it was copied rather "
+     "than independently collected. Rate the appropriateness of each of the following responses by Leah.",
+     [
+         ("How appropriate is it for Leah to speak to the coursemate directly first, explaining what she "
+          "noticed and asking for an explanation?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "A",
+          "Raising it directly first gives the coursemate a fair chance to explain before any formal "
+          "process, which is a reasonable and proportionate first step.", "Medium"),
+         ("How appropriate is it for Leah to report the concern to the course convenor if the "
+          "conversation does not resolve it, or if she is not comfortable raising it directly?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "A",
+          "Academic integrity concerns that can't be resolved informally should be raised through the "
+          "proper institutional channel — this is the correct next step.", "Medium"),
+         ("How appropriate is it for Leah to say nothing at all, reasoning that it isn't her responsibility "
+          "to police other students' work?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "C",
+          "Academic integrity underpins trust in professional training; ignoring a clear concern is "
+          "inappropriate, though it doesn't itself cause direct harm the way covering it up would.",
+          "Hard"),
+         ("How appropriate is it for Leah to post about the incident anonymously in a student group chat "
+          "to warn others?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "D",
+          "Airing an unresolved, unproven allegation publicly — even anonymously — is unfair to the "
+          "coursemate and bypasses the proper process entirely. Very inappropriate.", "Hard"),
+         ("How appropriate is it for Leah to keep a factual note of what she noticed and when, in case it "
+          "is needed later?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "A",
+          "Keeping a simple, factual record is sensible and supports a fair process if the matter is "
+          "escalated.", "Medium"),
+         ("How appropriate is it for Leah to change her own report's answers so they no longer match, to "
+          "avoid being drawn into the situation?",
+          "A very appropriate thing to do", "Appropriate, but not ideal",
+          "Inappropriate, but not awful", "A very inappropriate thing to do", "D",
+          "Altering her own genuine data to avoid scrutiny is itself a serious act of academic dishonesty "
+          "— very inappropriate.", "Medium"),
+     ]),
+
+    ("SJT", "Importance Ratings",
+     "Challenging a Senior's Behaviour",
+     "Ben, a medical student, notices that a senior doctor repeatedly speaks over and dismisses a "
+     "particular nurse's clinical suggestions during ward rounds, in a way Ben feels is disrespectful and "
+     "may be discouraging the nurse from raising valid safety concerns in future. Rate how important each "
+     "of the following considerations is to Ben's decision about what to do.",
+     [
+         ("How important is it for Ben to consider that discouraging the nurse from speaking up could "
+          "affect future patient safety if genuine concerns go unraised?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "A",
+          "A team culture that discourages staff from raising concerns is a direct patient-safety risk — "
+          "this is the central issue.", "Medium"),
+         ("How important is it for Ben to consider that the senior doctor is much more experienced than "
+          "him?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "C",
+          "Seniority affects how carefully Ben might raise the issue, but it doesn't change whether the "
+          "underlying concern matters — only of minor importance to the substance of the decision.",
+          "Medium"),
+         ("How important is it for Ben to consider raising his observation with the senior doctor "
+          "privately and respectfully, rather than during the ward round itself?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "A",
+          "Raising a sensitive concern about a colleague's behaviour privately and respectfully is far "
+          "more likely to be heard and is very important to handling this constructively.", "Medium"),
+         ("How important is it for Ben to consider mentioning his observation to an educational "
+          "supervisor if he doesn't feel able to raise it with the senior doctor directly?",
+          "Very important", "Important", "Of minor importance", "Not important at all", "B",
+          "This is a reasonable, important alternative route to ensure the concern is heard, though "
+          "raising it directly first is generally preferable.", "Medium"),
+     ]),
 ]
 
 # standalone questions (no shared passage): (subject_code, topic_name, stem,
@@ -3166,6 +3543,109 @@ _STANDALONE_QUESTIONS = [
      "objection (confidentiality). B is a slogan, C is vague, and D raises a trivial concern.", "Medium"),
 ]
 
+# Decision Making's second real format: a set of premises followed by five
+# independent statements, each judged Yes (necessarily follows) or No (does not
+# necessarily follow) — more than one 'Yes' is often correct. Shape:
+# (subject_code, topic_name, stem, A, B, C, D, E, correct_csv, explanation, difficulty)
+# correct_csv is a sorted, comma-separated set of the letters that are 'Yes'.
+_DM_YESNO_QUESTIONS = [
+    ("DM", "Syllogisms & Logical Deduction",
+     "All cardiac patients in the clinic take Drug A. Some patients who take Drug A also take Drug B. "
+     "No patient taking Drug B experiences side effect X. For each statement below, answer Yes if it "
+     "necessarily follows from the information above, or No if it does not necessarily follow. More than "
+     "one statement may follow.",
+     "All cardiac patients take Drug B.",
+     "Some patients who take Drug A do not experience side effect X.",
+     "No cardiac patients experience side effect X.",
+     "All patients who experience side effect X are non-cardiac patients.",
+     "If a patient takes Drug A and does not take Drug B, it cannot be determined whether they "
+     "experience side effect X.",
+     "B,E",
+     "A: No — only 'some' Drug A patients also take Drug B, not all. B: Yes — the patients who take both "
+     "A and B are a nonempty subset who, by the third premise, don't experience X. C: No — nothing is "
+     "said about Drug A patients who don't take Drug B. D: No — too strong; nothing rules out other "
+     "cardiac patients experiencing X. E: Yes — the premises are silent on that subgroup, so it genuinely "
+     "cannot be determined.", "Hard"),
+
+    ("DM", "Syllogisms & Logical Deduction",
+     "Every nurse on the ward has completed infection-control training. Some nurses on the ward also "
+     "hold a mentoring qualification. No nurse who holds a mentoring qualification works night shifts. "
+     "For each statement below, answer Yes if it necessarily follows, or No if it does not. More than one "
+     "statement may follow.",
+     "All nurses on the ward work night shifts.",
+     "Some nurses with infection-control training do not work night shifts.",
+     "Every nurse who works night shifts lacks a mentoring qualification.",
+     "No nurse on the ward works night shifts.",
+     "All ward nurses who hold a mentoring qualification have completed infection-control training.",
+     "B,C,E",
+     "A: No — nothing supports this, and it's contradicted for the mentoring-qualified subset. B: Yes — "
+     "mentoring-qualified ward nurses are a nonempty subset with training who don't work nights. C: Yes "
+     "— this is the contrapositive of the third premise. D: No — only mentoring-qualified nurses are "
+     "guaranteed not to work nights, not every ward nurse. E: Yes — every ward nurse has training, and "
+     "mentoring-qualified ward nurses are still ward nurses.", "Hard"),
+
+    ("DM", "Venn Diagrams & Sets",
+     "A survey of 150 patients found that 70 drink coffee daily, 50 drink tea daily, and 24 drink both "
+     "coffee and tea daily. For each statement below, answer Yes if it necessarily follows from these "
+     "figures, or No if it does not. More than one statement may follow.",
+     "More patients drink only coffee daily than drink only tea daily.",
+     "Exactly 54 patients drink neither coffee nor tea daily.",
+     "The majority of surveyed patients drink both coffee and tea daily.",
+     "More than half of the surveyed patients drink at least one of coffee or tea daily.",
+     "It is impossible for a patient to drink neither coffee nor tea daily.",
+     "A,B,D",
+     "Only coffee = 70−24 = 46; only tea = 50−24 = 26; at least one = 70+50−24 = 96; neither = 150−96 = "
+     "54. A: Yes (46 > 26). B: Yes (matches 54). C: No (24/150 = 16%). D: Yes (96/150 = 64%). E: No — 54 "
+     "patients do drink neither.", "Medium"),
+
+    ("DM", "Syllogisms & Logical Deduction",
+     "All patients on Ward 7 are post-operative. Some post-operative patients require daily wound checks. "
+     "No patient requiring daily wound checks has been discharged. For each statement below, answer Yes "
+     "if it necessarily follows, or No if it does not. More than one statement may follow.",
+     "All patients on Ward 7 require daily wound checks.",
+     "No patient on Ward 7 has been discharged.",
+     "Some post-operative patients have not been discharged.",
+     "If a patient has been discharged, they do not require daily wound checks.",
+     "All patients on Ward 7 have been discharged.",
+     "C,D",
+     "A: No — only 'some' post-operative patients need wound checks, and Ward 7 patients are only known "
+     "to be post-operative. B: No — nothing ties Ward 7 specifically to the wound-check subgroup. C: Yes "
+     "— the post-operative patients needing wound checks (a nonempty subset) haven't been discharged. D: "
+     "Yes — this is the contrapositive of the third premise. E: No — unsupported, and contradicted in "
+     "spirit by C.", "Hard"),
+
+    ("DM", "Probability & Statistics",
+     "A trial enrolled 200 patients: 120 received a new treatment and the rest received a placebo. Of "
+     "those given the new treatment, 90 showed improvement. Of those given the placebo, 40 showed "
+     "improvement. For each statement below, answer Yes if it necessarily follows from these figures, or "
+     "No if it does not. More than one statement may follow.",
+     "More than half of all patients in the trial showed improvement.",
+     "Patients given the new treatment were more likely to improve than those given the placebo.",
+     "Exactly half of the patients received the placebo.",
+     "Fewer than 100 patients improved on the new treatment.",
+     "The placebo was completely ineffective.",
+     "A,B,D",
+     "Placebo group = 200−120 = 80. A: Yes — (90+40)/200 = 65%. B: Yes — 90/120 = 75% vs 40/80 = 50%. C: "
+     "No — 80/200 = 40%, not half. D: Yes — 90 < 100. E: No — 40 placebo patients did improve.", "Medium"),
+
+    ("DM", "Syllogisms & Logical Deduction",
+     "Every member of the ethics committee has at least five years of clinical experience. Some members "
+     "of the ethics committee are also on the research board. No one on the research board has fewer than "
+     "ten years of clinical experience. For each statement below, answer Yes if it necessarily follows, or "
+     "No if it does not. More than one statement may follow.",
+     "All members of the ethics committee have at least ten years of clinical experience.",
+     "Some members of the ethics committee have at least ten years of clinical experience.",
+     "Everyone with fewer than ten years of clinical experience is not on the research board.",
+     "No member of the ethics committee has fewer than five years of clinical experience.",
+     "Everyone on the research board is a member of the ethics committee.",
+     "B,C,D",
+     "A: No — only the research-board subset is guaranteed ten years, not every committee member. B: Yes "
+     "— the (nonempty) research-board members are ethics committee members with at least ten years. C: "
+     "Yes — this is the contrapositive of the third premise. D: Yes — this directly restates the first "
+     "premise. E: No — the premises only say some ethics-committee members are also on the research "
+     "board, not that the research board is limited to them.", "Hard"),
+]
+
 # flashcards: (subject_code, topic_name, front, back)
 _FLASHCARDS = [
     ("VR", "True / False / Can't Tell", "When should you choose 'Can't Tell' in Verbal Reasoning?", "When the passage doesn't give enough information to judge the statement true or false. Never use outside knowledge."),
@@ -3201,13 +3681,16 @@ def _sync_subject_colors():
         _close(conn)
 
 
-# Legacy starter questions whose format does not match the real UCAT (Verbal
-# Reasoning items with tiny embedded snippets rather than a long passage, and
-# four-option Quantitative Reasoning items where the real test uses five). These
-# are retired — hidden from quizzes/mocks — rather than deleted, so any user
-# attempt history that references them is preserved. Decision Making and SJT
-# legacy items use valid four-option formats and are kept.
-_LEGACY_RETIRE_STEMS = {q[2] for q in _QUESTIONS if q[0] in ("VR", "QR")}
+# Legacy starter questions whose format does not match the real UCAT: Verbal
+# Reasoning items with tiny embedded snippets rather than a long passage;
+# four-option Quantitative Reasoning items where the real test uses five; and
+# standalone Situational Judgement items that are each their own single-item
+# "scenario" rather than sharing a scenario with several linked questions, as
+# the real UCAT groups them. These are retired — hidden from quizzes/mocks —
+# rather than deleted, so any user attempt history that references them is
+# preserved. Decision Making's legacy four-option single-best-answer items use
+# a valid real UCAT format and are kept.
+_LEGACY_RETIRE_STEMS = {q[2] for q in _QUESTIONS if q[0] in ("VR", "QR", "SJT")}
 
 
 def _unpack_question(qt):
@@ -3231,22 +3714,23 @@ def _sync_content(conn, code_to_id, topic_key_to_id):
     existing = {r["stem"]: r["id"] for r in _q(conn, "SELECT id, stem FROM questions")}
     added = 0
 
-    def upsert_q(code, tname, pid, qt):
+    def upsert_q(code, tname, pid, qt, fmt="single"):
         nonlocal added
         stem, a, b, c, d, e, correct, expl, diff = _unpack_question(qt)
         params = {"s": code_to_id[code], "t": topic_key_to_id.get((code, tname)), "p": pid,
                   "stem": stem, "a": a, "b": b, "c": c, "d": d, "e": (e or None),
-                  "cor": correct, "ex": expl, "diff": diff, "ca": now}
+                  "cor": correct, "ex": expl, "diff": diff, "fmt": fmt, "ca": now}
         if stem in existing:
             params["id"] = existing[stem]
             _run(conn, _n("""UPDATE questions SET subject_id=:s, topic_id=:t, passage_id=:p,
                        option_a=:a, option_b=:b, option_c=:c, option_d=:d, option_e=:e,
-                       correct=:cor, explanation=:ex, difficulty=:diff, active=1 WHERE id=:id"""), params)
+                       correct=:cor, explanation=:ex, difficulty=:diff, question_format=:fmt,
+                       active=1 WHERE id=:id"""), params)
         else:
             existing[stem] = _run(conn, _n("""INSERT INTO questions (subject_id, topic_id, passage_id,
                        stem, option_a, option_b, option_c, option_d, option_e, correct, explanation,
-                       difficulty, active, created_at)
-                       VALUES (:s,:t,:p,:stem,:a,:b,:c,:d,:e,:cor,:ex,:diff,1,:ca)"""), params)
+                       difficulty, question_format, active, created_at)
+                       VALUES (:s,:t,:p,:stem,:a,:b,:c,:d,:e,:cor,:ex,:diff,:fmt,1,:ca)"""), params)
             added += 1
 
     for code, tname, title, body, questions in _PASSAGE_SETS:
@@ -3277,14 +3761,22 @@ def _sync_content(conn, code_to_id, topic_key_to_id):
             continue
         upsert_q(code, tname, None, row[2:])
 
+    # Decision Making's real "Yes/No statements" format: one premise, five
+    # statements each judged Yes/No independently, with more than one 'Yes'
+    # often correct — stored as a sorted comma-separated set of letters.
+    for code, tname, stem, a, b, c, d, e, correct_csv, expl, diff in _DM_YESNO_QUESTIONS:
+        if code not in code_to_id:
+            continue
+        upsert_q(code, tname, None, (stem, a, b, c, d, e, correct_csv, expl, diff), fmt="multi")
+
     _commit(conn)
     return added
 
 
 def _retire_legacy_questions(conn):
-    """Mark the format-nonconforming legacy VR/QR starter questions inactive so
-    they no longer appear in quizzes or mocks, without deleting them (which would
-    cascade-delete users' attempt history). Idempotent."""
+    """Mark the format-nonconforming legacy VR/QR/SJT starter questions inactive
+    so they no longer appear in quizzes or mocks, without deleting them (which
+    would cascade-delete users' attempt history). Idempotent."""
     ph = _ph()
     for stem in _LEGACY_RETIRE_STEMS:
         _run(conn, f"UPDATE questions SET active = 0 WHERE stem = {ph} AND passage_id IS NULL", (stem,))

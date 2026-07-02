@@ -636,6 +636,66 @@ def _render_passage(q, quiz, idx):
                    "the passage stays visible for every question in the set.")
 
 
+def _is_multi(q):
+    """True for Decision Making's real 'Yes/No statements' format, where a
+    question has several independently-judged statements and more than one can
+    be correct — as opposed to the usual single-best-answer format."""
+    return q.get("question_format") == "multi"
+
+
+def _is_correct(q, chosen):
+    """Grade an answer against a question's format. Multi-format answers are a
+    comma-joined set of letters (the statements marked 'Yes') and must match the
+    full correct set exactly, mirroring the real UCAT task where every
+    statement must be judged correctly."""
+    if _is_multi(q):
+        picked = {x for x in (chosen or "").split(",") if x}
+        return picked == set(q["correct"].split(","))
+    return chosen == q["correct"]
+
+
+def _answer_input(q, key, prev=None):
+    """Render the answer widget matching a question's format and return the raw
+    selection — a single letter for the usual single-best-answer format, or a
+    sorted comma-joined set of letters marked 'Yes' for Decision Making's
+    multi-statement Yes/No format. `prev` restores a previously-saved answer
+    (used by the Mock Exam, where a question can be revisited via Back)."""
+    options = _q_options(q)
+    if _is_multi(q):
+        st.caption("For each statement, check the box if it **follows** from the information above "
+                   "(Yes). Leave it unchecked if it does not follow (No). More than one may be correct.")
+        prev_set = {x for x in (prev or "").split(",") if x}
+        picked = [k for k, v in options.items()
+                  if st.checkbox(f"{k}. {v}", value=(k in prev_set), key=f"{key}_{k}")]
+        return ",".join(sorted(picked))
+    idx = list(options).index(prev) if prev in options else 0
+    return st.radio("Choose one:", list(options.keys()),
+                     format_func=lambda k: f"{k}. {options[k]}", index=idx, key=key)
+
+
+def _render_answer_review(q, chosen):
+    """Show the post-submit breakdown of a question's options — a per-statement
+    Yes/No comparison for Decision Making's multi-format questions, or the usual
+    highlighted single choice otherwise."""
+    options = _q_options(q)
+    if _is_multi(q):
+        correct_set = set(q["correct"].split(","))
+        chosen_set = {x for x in (chosen or "").split(",") if x}
+        for k, v in options.items():
+            your = "Yes" if k in chosen_set else "No"
+            right = "Yes" if k in correct_set else "No"
+            mark = "✅" if your == right else "❌"
+            st.markdown(f"{mark} **{k}. {v}** — you said **{your}**, correct is **{right}**")
+        return
+    for k, v in options.items():
+        if k == q["correct"]:
+            st.markdown(f"✅ **{k}. {v}**")
+        elif k == chosen:
+            st.markdown(f"❌ ~~{k}. {v}~~")
+        else:
+            st.markdown(f"&nbsp;&nbsp;&nbsp;{k}. {v}", unsafe_allow_html=True)
+
+
 def page_practice():
     st.title("📝 Practice Questions")
     ss = st.session_state
@@ -707,14 +767,12 @@ def page_practice():
     _render_passage(q, quiz, idx)
     st.markdown(f"### {q['stem']}")
 
-    options = _q_options(q)
     answered = ss["quiz_answered"].get(idx)
 
-    if not answered:
-        choice = st.radio("Choose one:", list(options.keys()),
-                          format_func=lambda k: f"{k}. {options[k]}", key=f"q_{idx}")
+    if answered is None:
+        choice = _answer_input(q, key=f"q_{idx}")
         if st.button("Submit answer", type="primary"):
-            is_correct = (choice == q["correct"])
+            is_correct = _is_correct(q, choice)
             elapsed = datetime.now().timestamp() - ss.get("quiz_start", datetime.now().timestamp())
             elapsed = round(elapsed, 1)
             db.record_attempt(ss["user_id"], q["id"], q["subject_id"], choice, is_correct, elapsed)
@@ -726,15 +784,12 @@ def page_practice():
             ss["quiz_start"] = datetime.now().timestamp()
             st.rerun()
     else:
-        for k, v in options.items():
-            if k == q["correct"]:
-                st.markdown(f"✅ **{k}. {v}**")
-            elif k == answered:
-                st.markdown(f"❌ ~~{k}. {v}~~")
-            else:
-                st.markdown(f"&nbsp;&nbsp;&nbsp;{k}. {v}", unsafe_allow_html=True)
-        if answered == q["correct"]:
+        _render_answer_review(q, answered)
+        if _is_correct(q, answered):
             st.success("Correct!")
+        elif _is_multi(q):
+            st.error("Not fully correct — every statement must be judged correctly to score this "
+                     "question, as in the real UCAT.")
         else:
             st.error(f"Not quite — the answer is **{q['correct']}**.")
         taken = ss["quiz_times"].get(idx)
@@ -1673,8 +1728,8 @@ def _finish_mock(ss, elapsed):
         times = ss.get("mock_times", {})
         for i, q in enumerate(ss["mock"]):
             chosen = ss["mock_answers"].get(i)
-            if chosen:
-                db.record_attempt(ss["user_id"], q["id"], q["subject_id"], chosen, chosen == q["correct"],
+            if chosen is not None:
+                db.record_attempt(ss["user_id"], q["id"], q["subject_id"], chosen, _is_correct(q, chosen),
                                    times.get(i, 0))
 
         rows = _mock_results(ss)
@@ -1703,7 +1758,7 @@ def _mock_results(ss):
                                    "color": SUB_BY_ID[q["subject_id"]]["color"],
                                    "correct": 0, "total": 0})
         r["total"] += 1
-        if answers.get(i) == q["correct"]:
+        if answers.get(i) is not None and _is_correct(q, answers.get(i)):
             r["correct"] += 1
     return rows
 
@@ -1753,11 +1808,18 @@ def page_mock():
         with st.expander("Review answers"):
             for i, q in enumerate(ss["mock"]):
                 chosen = ss["mock_answers"].get(i)
-                ok = chosen == q["correct"]
-                mark = "✅" if ok else ("❌" if chosen else "⏭️")
+                skipped = chosen is None
+                ok = (not skipped) and _is_correct(q, chosen)
+                mark = "✅" if ok else ("⏭️" if skipped else "❌")
                 st.markdown(f"{mark} **{q['stem'][:90]}**")
-                opts = _q_options(q)
-                st.caption(f"Your answer: {chosen or '— (skipped)'} · Correct: {q['correct']} ({opts.get(q['correct'], '?')})")
+                if _is_multi(q):
+                    st.caption(f"Your Yes answers: {chosen.replace(',', ', ') if chosen else '— none'} · "
+                               f"Correct Yes answers: {q['correct'].replace(',', ', ')}"
+                               + (" (skipped)" if skipped else ""))
+                else:
+                    opts = _q_options(q)
+                    st.caption(f"Your answer: {chosen or '— (skipped)'} · "
+                               f"Correct: {q['correct']} ({opts.get(q['correct'], '?')})")
                 if q.get("explanation"):
                     st.caption(f"💡 {q['explanation']}")
 
@@ -1845,12 +1907,8 @@ def page_mock():
     _render_passage(q, quiz, idx)
     st.markdown(f"### {q['stem']}")
 
-    options = _q_options(q)
     prev = ss["mock_answers"].get(idx)
-    choice = st.radio("Choose one:", list(options.keys()),
-                      format_func=lambda k: f"{k}. {options[k]}",
-                      index=list(options).index(prev) if prev in options else 0,
-                      key=f"mock_q_{idx}")
+    choice = _answer_input(q, key=f"mock_q_{idx}", prev=prev)
 
     nav = st.columns([1, 1, 1, 3])
     if nav[0].button("◀ Back", disabled=idx == 0):
