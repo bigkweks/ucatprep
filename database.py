@@ -11,6 +11,8 @@ import re
 import json
 import hashlib
 import secrets
+import threading
+import time
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
@@ -18,6 +20,7 @@ from pathlib import Path
 try:
     import psycopg2
     import psycopg2.extras
+    import psycopg2.pool
     _HAS_PG = True
 except ImportError:
     _HAS_PG = False
@@ -28,7 +31,8 @@ DB_PATH = Path(__file__).parent / "ucat.db"
 _USE_PG: bool | None = None
 _DB_URL: str = ""
 _BOOTSTRAPPED: bool = False
-_CONN = None  # cached Postgres connection, reused for the life of the process
+_POOL = None  # small Postgres connection pool, shared across every session/thread
+_POOL_LOCK = threading.Lock()
 
 
 def _setup() -> bool:
@@ -43,56 +47,114 @@ def _ph() -> str:
     return "%s" if _setup() else "?"
 
 
-def _connect_pg():
+def _pg_dsn() -> str:
     # Neon (and most cloud PostgreSQL) requires SSL — add sslmode=require if absent
     url = _DB_URL
     if "sslmode" not in url:
         url += ("&" if "?" in url else "?") + "sslmode=require"
-    conn = psycopg2.connect(url, cursor_factory=psycopg2.extras.RealDictCursor)
-    # Single long-lived connection: autocommit avoids a failed statement leaving
-    # the connection in an aborted-transaction state that poisons later queries.
-    conn.autocommit = True
-    return conn
+    return url
+
+
+def _make_pool():
+    return psycopg2.pool.ThreadedConnectionPool(
+        1, 20, _pg_dsn(), cursor_factory=psycopg2.extras.RealDictCursor
+    )
+
+
+def _get_pool():
+    """Lazily create the shared Postgres pool (double-checked locking so
+    concurrent first calls from different Streamlit session threads don't
+    each build their own pool)."""
+    global _POOL
+    if _POOL is None:
+        with _POOL_LOCK:
+            if _POOL is None:
+                _POOL = _make_pool()
+    return _POOL
+
+
+def _drop_pool():
+    """Discard the whole pool so the next call rebuilds it from scratch. Used
+    when a query hits a connection-level error: if one pooled connection was
+    silently killed (e.g. a Neon idle-suspend), the others are usually stale
+    too, so it's not worth trying to save them individually."""
+    global _POOL
+    with _POOL_LOCK:
+        old, _POOL = _POOL, None
+    if old is not None:
+        try:
+            old.closeall()
+        except Exception:
+            pass
 
 
 def get_conn():
     """Return a database connection.
 
-    For Postgres/Neon the connection is cached and reused for the life of the
-    process — opening a fresh SSL connection on every query was the main source
-    of per-interaction latency. A closed/dropped connection is reopened on the
-    next call. SQLite is a local file and cheap to open, so it stays per-call.
+    Postgres uses a small thread-safe connection pool. Streamlit runs each
+    active user session in its own server-side thread, so a single shared
+    connection (the previous design) isn't safe for concurrent queries —
+    multiple threads could end up issuing commands on it at the same time.
+    Borrowing an already-authenticated connection from the pool keeps the
+    original latency win (no fresh SSL handshake per query) while making
+    concurrent access safe. SQLite is a local file and cheap to open, so it
+    stays per-call.
     """
-    global _CONN
     if _setup():
-        if _CONN is None or getattr(_CONN, "closed", 1):
-            _CONN = _connect_pg()
-        return _CONN
+        conn = _checkout_pg_conn()
+        conn.autocommit = True  # avoids a failed statement poisoning the transaction
+        return conn
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
-def _drop_conn():
-    """Discard the cached Postgres connection so the next call reconnects."""
-    global _CONN
-    if _CONN is not None:
+def _checkout_pg_conn():
+    """Borrow a connection from the pool, briefly waiting and retrying if it's
+    momentarily exhausted rather than failing outright. psycopg2's pool raises
+    PoolError immediately instead of blocking when all 20 connections are
+    checked out; since every borrow here is held only for a quick handful of
+    queries, a short wait almost always finds one freed up rather than making
+    a genuine concurrent user see an error.
+
+    Also discards and retries if the borrowed connection is already known to
+    be closed — a connection that died while sitting idle in the pool (e.g. a
+    Neon idle-suspend, or a previous caller explicitly closing it) fails as
+    soon as it's touched, before a query is even run, so this can't wait for
+    _pg_run's retry-on-query-failure path; it has to be caught here instead."""
+    pool = _get_pool()
+    deadline = time.monotonic() + 5
+    while True:
         try:
-            _CONN.close()
-        except Exception:
-            pass
-        _CONN = None
+            conn = pool.getconn()
+        except psycopg2.pool.PoolError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
+            continue
+        if conn.closed:
+            pool.putconn(conn, close=True)
+            continue
+        return conn
 
 
-def _pg_call(run):
-    """Run ``run(conn)`` on the cached Postgres connection, reconnecting and
-    retrying once if it has been dropped (e.g. a Neon idle timeout)."""
+def _pg_run(conn, fn):
+    """Run ``fn(conn)`` against a pooled Postgres connection, retrying once on
+    a connection-level error (e.g. a Neon idle-suspend killed it while it sat
+    in the pool). The retry borrows and returns its own connection from a
+    freshly rebuilt pool, independent of the caller's original (now-dead)
+    connection — see _close()'s tolerant handling of returning that one."""
     try:
-        return run(get_conn())
+        return fn(conn)
     except (psycopg2.OperationalError, psycopg2.InterfaceError):
-        _drop_conn()
-        return run(get_conn())
+        _drop_pool()
+        retry_conn = _get_pool().getconn()
+        retry_conn.autocommit = True
+        try:
+            return fn(retry_conn)
+        finally:
+            _get_pool().putconn(retry_conn)
 
 
 def _n(sql: str) -> str:
@@ -109,7 +171,7 @@ def _q(conn, sql: str, params=()):
             with c.cursor() as cur:
                 cur.execute(sql, params or None)
                 return [dict(r) for r in cur.fetchall()]
-        return _pg_call(run)
+        return _pg_run(conn, run)
     return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
@@ -121,7 +183,7 @@ def _q1(conn, sql: str, params=()):
                 cur.execute(sql, params or None)
                 row = cur.fetchone()
                 return dict(row) if row else None
-        return _pg_call(run)
+        return _pg_run(conn, run)
     row = conn.execute(sql, params).fetchone()
     return dict(row) if row else None
 
@@ -138,22 +200,32 @@ def _run(conn, sql: str, params=()):
                     row = cur.fetchone()
                     return row["id"] if row else None
             return None
-        return _pg_call(run)
+        return _pg_run(conn, run)
     cur = conn.execute(sql, params)
     return cur.lastrowid
 
 
 def _commit(conn):
-    # Postgres runs in autocommit mode (see _connect_pg); commit() is a harmless
+    # Postgres runs in autocommit mode (see get_conn); commit() is a harmless
     # no-op there. SQLite still needs an explicit commit.
     if not _setup():
         conn.commit()
 
 
 def _close(conn):
-    # The Postgres connection is cached and reused, so closing it here would
-    # defeat the purpose. SQLite connections are per-call and must be closed.
-    if not _setup():
+    """Return a Postgres connection to the pool so another thread can reuse
+    it (discarding it instead if it's been closed or the pool was rebuilt
+    under it — see _pg_run). SQLite connections are per-call and must be
+    closed outright."""
+    if _setup():
+        try:
+            _get_pool().putconn(conn, close=getattr(conn, "closed", True))
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    else:
         conn.close()
 
 
