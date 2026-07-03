@@ -10,6 +10,7 @@ import os
 import re
 import json
 import hashlib
+import hmac
 import secrets
 import threading
 import time
@@ -237,7 +238,19 @@ CREATE TABLE IF NOT EXISTS users (
     username      TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     salt          TEXT NOT NULL,
+    hash_iterations INTEGER DEFAULT 100000,
     created_at    TEXT
+);
+-- Failed-login tracking, keyed by the raw username string typed at the login
+-- form (not a user_id FK) so a lockout applies even against a username that
+-- doesn't exist — otherwise "does a lockout apply" would itself leak whether
+-- an account exists.
+CREATE TABLE IF NOT EXISTS login_attempts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    username        TEXT NOT NULL UNIQUE,
+    failed_count    INTEGER DEFAULT 0,
+    locked_until    TEXT,
+    last_attempt_at TEXT
 );
 CREATE TABLE IF NOT EXISTS subjects (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -374,7 +387,15 @@ _PG_TABLES = [
         username      TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
         salt          TEXT NOT NULL,
+        hash_iterations INTEGER DEFAULT 100000,
         created_at    TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS login_attempts (
+        id              SERIAL PRIMARY KEY,
+        username        TEXT NOT NULL UNIQUE,
+        failed_count    INTEGER DEFAULT 0,
+        locked_until    TEXT,
+        last_attempt_at TEXT
     )""",
     """CREATE TABLE IF NOT EXISTS subjects (
         id         SERIAL PRIMARY KEY,
@@ -598,6 +619,23 @@ def _migrate_question_format(conn):
     _commit(conn)
 
 
+def _migrate_auth_hardening(conn):
+    """Add users.hash_iterations for databases created before password hashing
+    tracked its own PBKDF2 iteration count. Existing rows default to 100000 —
+    the count every earlier account was actually hashed with — so their
+    passwords keep verifying correctly; only new hashes (and any password
+    re-hashed on a later successful login, see verify_user) use the current,
+    stronger count. Guarded to be safe to re-run and safe on databases that
+    predate it."""
+    if not _column_exists(conn, "users", "hash_iterations"):
+        if _setup():
+            with conn.cursor() as cur:
+                cur.execute("ALTER TABLE users ADD COLUMN hash_iterations INTEGER DEFAULT 100000")
+        else:
+            conn.execute("ALTER TABLE users ADD COLUMN hash_iterations INTEGER DEFAULT 100000")
+        _commit(conn)
+
+
 def init_db():
     """Create tables, migrate older schemas, seed starter content on first
     run, and backfill any newer seed content into an already-populated
@@ -619,6 +657,7 @@ def init_db():
         _migrate_passage_id(conn)
         _migrate_question_options(conn)
         _migrate_question_format(conn)
+        _migrate_auth_hardening(conn)
         _backfill_mistakes_from_history(conn)
     finally:
         _close(conn)
@@ -645,8 +684,16 @@ def get_subject_map():
 
 # ── Users / accounts ─────────────────────────────────────────────────────────
 
-def _hash_password(password: str, salt: str) -> str:
-    return hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100_000).hex()
+# PBKDF2-HMAC-SHA256 iteration count for newly created/changed passwords.
+# Existing accounts keep verifying at whatever count they were originally
+# hashed with (stored per-row in users.hash_iterations) and are transparently
+# upgraded to this count the next time they log in successfully — see
+# verify_user — so raising this number later is always safe to do.
+_HASH_ITERATIONS = 600_000
+
+
+def _hash_password(password: str, salt: str, iterations: int = _HASH_ITERATIONS) -> str:
+    return hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), iterations).hex()
 
 
 def create_user(username: str, password: str):
@@ -659,10 +706,10 @@ def create_user(username: str, password: str):
             return None
         salt = secrets.token_hex(16)
         uid = _run(conn, _n("""
-            INSERT INTO users (username, password_hash, salt, created_at)
-            VALUES (:u, :h, :s, :ca)
+            INSERT INTO users (username, password_hash, salt, hash_iterations, created_at)
+            VALUES (:u, :h, :s, :it, :ca)
         """), {"u": username, "h": _hash_password(password, salt), "s": salt,
-               "ca": datetime.now().isoformat()})
+               "it": _HASH_ITERATIONS, "ca": datetime.now().isoformat()})
         _commit(conn)
         return uid
     finally:
@@ -670,14 +717,28 @@ def create_user(username: str, password: str):
 
 
 def verify_user(username: str, password: str):
-    """Return the user row if the username/password match, else None."""
+    """Return the user row if the username/password match, else None.
+
+    Verifies against whichever iteration count the account's hash actually
+    used (older accounts may predate a later increase to _HASH_ITERATIONS),
+    then transparently re-hashes at the current count on a successful login
+    if it's out of date — so strengthening the hash over time never requires
+    a mass password reset."""
     ph = _ph()
     conn = get_conn()
     try:
         row = _q1(conn, f"SELECT * FROM users WHERE username = {ph}", (username.strip(),))
-        if row and _hash_password(password, row["salt"]) == row["password_hash"]:
-            return row
-        return None
+        if not row:
+            return None
+        iterations = row["hash_iterations"] or 100_000
+        if not hmac.compare_digest(_hash_password(password, row["salt"], iterations), row["password_hash"]):
+            return None
+        if iterations < _HASH_ITERATIONS:
+            new_hash = _hash_password(password, row["salt"], _HASH_ITERATIONS)
+            _run(conn, _n("UPDATE users SET password_hash = :h, hash_iterations = :it WHERE id = :id"),
+                 {"h": new_hash, "it": _HASH_ITERATIONS, "id": row["id"]})
+            _commit(conn)
+        return row
     finally:
         _close(conn)
 
@@ -688,8 +749,68 @@ def set_password(user_id, new_password: str):
     ph = _ph()
     conn = get_conn()
     try:
-        _run(conn, f"UPDATE users SET password_hash = {ph}, salt = {ph} WHERE id = {ph}",
-             (_hash_password(new_password, salt), salt, user_id))
+        _run(conn, f"UPDATE users SET password_hash = {ph}, salt = {ph}, hash_iterations = {ph} WHERE id = {ph}",
+             (_hash_password(new_password, salt), salt, _HASH_ITERATIONS, user_id))
+        _commit(conn)
+    finally:
+        _close(conn)
+
+
+# ── Login lockout ──────────────────────────────────────────────────────────────
+# Tracked by the raw username string typed at the login form, not a user_id FK,
+# so a lockout applies the same way whether or not that username corresponds to
+# a real account — otherwise "is this username locked out" would itself leak
+# account existence.
+MAX_LOGIN_ATTEMPTS = 5
+LOGIN_LOCKOUT_MINUTES = 15
+
+
+def check_login_lockout(username: str):
+    """Return remaining lockout seconds (int > 0) if this username is currently
+    locked out, else None."""
+    ph = _ph()
+    conn = get_conn()
+    try:
+        row = _q1(conn, f"SELECT locked_until FROM login_attempts WHERE username = {ph}", (username.strip(),))
+        if not row or not row["locked_until"]:
+            return None
+        remaining = (datetime.fromisoformat(row["locked_until"]) - datetime.now()).total_seconds()
+        return int(remaining) if remaining > 0 else None
+    finally:
+        _close(conn)
+
+
+def record_failed_login(username: str):
+    """Increment the failed-attempt count for this username, locking it out
+    for LOGIN_LOCKOUT_MINUTES once MAX_LOGIN_ATTEMPTS is reached."""
+    username = username.strip()
+    ph = _ph()
+    now = datetime.now()
+    conn = get_conn()
+    try:
+        row = _q1(conn, f"SELECT failed_count FROM login_attempts WHERE username = {ph}", (username,))
+        count = (row["failed_count"] if row else 0) + 1
+        locked_until = (now + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)).isoformat() \
+            if count >= MAX_LOGIN_ATTEMPTS else None
+        if row:
+            _run(conn, _n("""UPDATE login_attempts SET failed_count = :c, locked_until = :lu,
+                       last_attempt_at = :la WHERE username = :u"""),
+                 {"c": count, "lu": locked_until, "la": now.isoformat(), "u": username})
+        else:
+            _run(conn, _n("""INSERT INTO login_attempts (username, failed_count, locked_until, last_attempt_at)
+                       VALUES (:u, :c, :lu, :la)"""),
+                 {"u": username, "c": count, "lu": locked_until, "la": now.isoformat()})
+        _commit(conn)
+    finally:
+        _close(conn)
+
+
+def clear_login_attempts(username: str):
+    """Reset the failed-attempt counter — called after a successful login."""
+    ph = _ph()
+    conn = get_conn()
+    try:
+        _run(conn, f"DELETE FROM login_attempts WHERE username = {ph}", (username.strip(),))
         _commit(conn)
     finally:
         _close(conn)

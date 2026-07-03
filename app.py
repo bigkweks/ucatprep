@@ -14,6 +14,9 @@ gate access.
 
 import os
 import random
+import hmac
+import html
+import time
 from datetime import date, datetime, timedelta
 
 # Pull secrets into the environment before the data layer reads DATABASE_URL.
@@ -358,10 +361,19 @@ def _check_site_password() -> bool:
     with col:
         pw = st.text_input("Password", type="password", placeholder="Enter password", label_visibility="collapsed")
         if st.button("Continue", type="primary", width="stretch"):
-            if pw == pwd:
+            # Escalating delay per failed attempt (session-scoped — there's no
+            # per-account identifier for this shared gate to lock out against)
+            # plus a constant-time comparison, so guessing this password isn't
+            # both instant and subject to a timing side-channel.
+            fails = st.session_state.get("_site_gate_fails", 0)
+            if fails:
+                time.sleep(min(2 ** fails, 30))
+            if hmac.compare_digest(pw, pwd):
                 st.session_state["_site_authenticated"] = True
+                st.session_state.pop("_site_gate_fails", None)
                 st.rerun()
             else:
+                st.session_state["_site_gate_fails"] = fails + 1
                 st.error("Incorrect password — please try again.")
     st.stop()
     return False
@@ -388,13 +400,21 @@ def _check_account() -> bool:
                 u = st.text_input("Username")
                 p = st.text_input("Password", type="password")
                 if st.form_submit_button("Sign in", type="primary", width="stretch"):
-                    user = db.verify_user(u, p) if u and p else None
-                    if user:
-                        st.session_state["user_id"] = user["id"]
-                        st.session_state["username"] = user["username"]
-                        st.rerun()
+                    remaining = db.check_login_lockout(u) if u else None
+                    if remaining:
+                        mins = max(1, remaining // 60)
+                        st.error(f"Too many failed attempts. Try again in about {mins} minute(s).")
                     else:
-                        st.error("Incorrect username or password.")
+                        user = db.verify_user(u, p) if u and p else None
+                        if user:
+                            db.clear_login_attempts(u)
+                            st.session_state["user_id"] = user["id"]
+                            st.session_state["username"] = user["username"]
+                            st.rerun()
+                        else:
+                            if u:
+                                db.record_failed_login(u)
+                            st.error("Incorrect username or password.")
         with tab_signup:
             with st.form("signup_form"):
                 u2 = st.text_input("Choose a username")
@@ -405,8 +425,8 @@ def _check_account() -> bool:
                         st.error("Enter a username and password.")
                     elif p2 != p2b:
                         st.error("Passwords don't match.")
-                    elif len(p2) < 4:
-                        st.error("Password must be at least 4 characters.")
+                    elif len(p2) < 8:
+                        st.error("Password must be at least 8 characters.")
                     else:
                         uid = db.create_user(u2, p2)
                         if uid:
@@ -423,14 +443,38 @@ _check_site_password()
 _check_account()
 
 
+def _is_content_admin() -> bool:
+    """Whether the signed-in user may add/edit/delete the SHARED question,
+    flashcard and topic bank in Manage — content every user reads and studies
+    from, not just their own. Configured via the ADMIN_USERNAMES env var
+    (comma-separated usernames). If it's unset, every signed-in user keeps
+    today's behavior (full access) rather than silently locking everyone out
+    of managing content the moment this code ships to an existing deployment
+    with no admin list configured yet."""
+    raw = os.environ.get("ADMIN_USERNAMES", "")
+    admins = {u.strip() for u in raw.split(",") if u.strip()}
+    if not admins:
+        return True
+    return st.session_state.get("username") in admins
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 SUBJECTS = cached_subjects()
 SUB_BY_ID = {s["id"]: s for s in SUBJECTS}
 SUB_BY_NAME = {s["name"]: s for s in SUBJECTS}
 
 
+def _esc(s):
+    """Escape a string of untrusted, user-editable content (question stems/
+    options, flashcard text, etc.) before it's interpolated into HTML we
+    render with unsafe_allow_html — otherwise anyone who can add or edit that
+    shared content (via Manage) could plant a stored XSS payload that runs in
+    every other user's browser when they view it."""
+    return html.escape(str(s or ""))
+
+
 def pill(text, color):
-    return f"<span class='pill' style='background:{color}'>{text}</span>"
+    return f"<span class='pill' style='background:{color}'>{_esc(text)}</span>"
 
 
 def subject_selectbox(label, key=None, include_all=False, default_name=None):
@@ -878,7 +922,7 @@ def _render_answer_review(q, chosen):
         elif k == chosen:
             st.markdown(f"❌ ~~{k}. {v}~~")
         else:
-            st.markdown(f"&nbsp;&nbsp;&nbsp;{k}. {v}", unsafe_allow_html=True)
+            st.markdown(f"&nbsp;&nbsp;&nbsp;{k}. {_esc(v)}", unsafe_allow_html=True)
 
 
 def page_practice():
@@ -1048,7 +1092,7 @@ def page_mistakes():
     if resolved:
         with st.expander(f"✅ Mastered ({len(resolved)})"):
             for m in resolved:
-                st.markdown(pill(m["subject_name"], m["color"]) + f"&nbsp; {m['stem'][:120]}"
+                st.markdown(pill(m["subject_name"], m["color"]) + f"&nbsp; {_esc(m['stem'][:120])}"
                            f"{'…' if len(m['stem']) > 120 else ''}", unsafe_allow_html=True)
 
 
@@ -1090,7 +1134,7 @@ def page_flashcards():
 
     face = card["back"] if ss.get("fc_show_back") else card["front"]
     label = "ANSWER" if ss.get("fc_show_back") else "PROMPT"
-    st.markdown(f"<div class='flashcard'><div><div style='font-size:11px;letter-spacing:1px;color:#9aa;margin-bottom:12px'>{label}</div>{face}</div></div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='flashcard'><div><div style='font-size:11px;letter-spacing:1px;color:#9aa;margin-bottom:12px'>{label}</div>{_esc(face)}</div></div>", unsafe_allow_html=True)
     st.write("")
 
     if not ss.get("fc_show_back"):
@@ -1213,7 +1257,7 @@ def page_scheduler():
                 db.set_task_status(uid, t["id"], "Todo")
                 _invalidate_tasks_cache()
                 st.rerun()
-        title_md = f"~~{t['title']}~~" if done else f"**{t['title']}**"
+        title_md = f"~~{_esc(t['title'])}~~" if done else f"**{_esc(t['title'])}**"
         badge = pill(sub["name"], sub["color"]) if sub else ""
         cols[1].markdown(f"{title_md}  {badge}", unsafe_allow_html=True)
         cols[2].caption(f"🏷️ {t['task_type']} · ⏱️ {t['duration_min']}m")
@@ -2002,6 +2046,25 @@ def _tutor_context_line(uid):
             "(e.g. suggesting what to prioritise), but still answer whatever they actually ask.")
 
 
+TUTOR_DAILY_LIMIT = 40
+TUTOR_MAX_CHARS = 2000
+
+
+def _tutor_messages_today(uid):
+    """How many Tutor messages this user has sent today. Backed by the
+    generic user_context store, keyed per-day, so it resets naturally without
+    a cleanup job — old date-keys are simply never read again."""
+    raw = db.get_context(uid, f"tutor_count_{date.today().isoformat()}")
+    return int(raw) if raw else 0
+
+
+def _tutor_increment_today(uid):
+    key = f"tutor_count_{date.today().isoformat()}"
+    count = _tutor_messages_today(uid) + 1
+    db.set_context(uid, key, str(count))
+    return count
+
+
 def page_tutor():
     st.title("🤖 AI Tutor")
     uid = st.session_state["user_id"]
@@ -2014,8 +2077,10 @@ def page_tutor():
         )
         return
 
+    used_today = _tutor_messages_today(uid)
     cols = st.columns([4, 1])
-    cols[0].caption("Ask anything — concepts, practice problems, study strategy.")
+    cols[0].caption(f"Ask anything — concepts, practice problems, study strategy. "
+                     f"({used_today}/{TUTOR_DAILY_LIMIT} messages used today)")
     if cols[1].button("🗑️ Clear chat"):
         db.clear_chat_history(uid)
         st.rerun()
@@ -2029,12 +2094,23 @@ def page_tutor():
     # with a starter question already queued — send it once, automatically,
     # rather than making the student retype what they were just reading.
     prefill = st.session_state.pop("tutor_prefill", None)
-    prompt = st.chat_input("e.g. Explain the difference between competitive and noncompetitive inhibition")
+
+    if used_today >= TUTOR_DAILY_LIMIT:
+        st.info(f"You've used all {TUTOR_DAILY_LIMIT} of today's Tutor messages — this keeps API "
+                "costs bounded for whoever is paying for this deployment. It resets tomorrow.")
+        return
+
+    # max_chars bounds the cost of a single message the same way the daily
+    # count bounds the number of them — without it, one very long paste could
+    # still be expensive even under the message-count limit.
+    prompt = st.chat_input("e.g. Explain the difference between competitive and noncompetitive inhibition",
+                            max_chars=TUTOR_MAX_CHARS)
     if prefill and not prompt:
         prompt = prefill
 
     if prompt:
         db.save_message(uid, "user", prompt)
+        _tutor_increment_today(uid)
         with st.chat_message("user"):
             st.markdown(prompt)
         with st.chat_message("assistant"):
@@ -2054,7 +2130,11 @@ def page_tutor():
                     )
                 answer = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
             except Exception as e:
-                answer = f"⚠️ Sorry, the tutor hit an error: `{e}`"
+                # Log the real error server-side only — showing raw exception
+                # text to the end user can leak internal details (request IDs,
+                # SDK internals, occasionally fragments of request context).
+                print(f"AI Tutor error for user {uid}: {e}")
+                answer = "⚠️ Sorry, the tutor hit an error processing that. Please try again in a moment."
             st.markdown(answer)
             db.save_message(uid, "assistant", answer)
         st.rerun()
@@ -2066,6 +2146,7 @@ def page_tutor():
 def page_manage():
     st.title("⚙️ Manage")
     uid = st.session_state["user_id"]
+    is_admin = _is_content_admin()
     tabs = st.tabs(["Account", "Exam date", "Questions", "Flashcards", "Topics"])
 
     # Account
@@ -2083,8 +2164,8 @@ def page_manage():
                 user = db.verify_user(st.session_state["username"], cur_pw) if cur_pw else None
                 if not user:
                     st.error("Current password is incorrect.")
-                elif not new_pw or len(new_pw) < 4:
-                    st.error("New password must be at least 4 characters.")
+                elif not new_pw or len(new_pw) < 8:
+                    st.error("New password must be at least 8 characters.")
                 elif new_pw != new_pw2:
                     st.error("New passwords don't match.")
                 else:
@@ -2103,33 +2184,37 @@ def page_manage():
 
     # Questions
     with tabs[2]:
-        with st.form("add_q", clear_on_submit=True):
-            st.markdown("**Add a practice question**")
-            sname = st.selectbox("Subtest", [s["name"] for s in SUBJECTS], key="mq_sub")
-            stem = st.text_area("Question stem")
-            c = st.columns(2)
-            a = c[0].text_input("Option A")
-            b = c[1].text_input("Option B")
-            cc = c[0].text_input("Option C")
-            d = c[1].text_input("Option D")
-            e = st.text_input("Option E (optional — Quantitative Reasoning uses five options)")
-            c2 = st.columns(2)
-            correct = c2[0].selectbox("Correct answer", ["A", "B", "C", "D", "E"])
-            diff = c2[1].selectbox("Difficulty", ["Easy", "Medium", "Hard"], index=1)
-            expl = st.text_area("Explanation")
-            if st.form_submit_button("Add question", type="primary"):
-                if stem and a and b and cc and d:
-                    db.upsert_question({
-                        "subject_id": SUB_BY_NAME[sname]["id"], "stem": stem,
-                        "option_a": a, "option_b": b, "option_c": cc, "option_d": d,
-                        "option_e": e or None,
-                        "correct": correct, "explanation": expl, "difficulty": diff,
-                    })
-                    _invalidate_content_cache()
-                    st.success("Question added.")
-                    st.rerun()
-                else:
-                    st.warning("Fill in the stem and at least options A–D.")
+        if not is_admin:
+            st.info("🔒 Adding, editing and deleting shared questions is limited to admins on this "
+                     "deployment. You can still browse and search the bank below.")
+        else:
+            with st.form("add_q", clear_on_submit=True):
+                st.markdown("**Add a practice question**")
+                sname = st.selectbox("Subtest", [s["name"] for s in SUBJECTS], key="mq_sub")
+                stem = st.text_area("Question stem")
+                c = st.columns(2)
+                a = c[0].text_input("Option A")
+                b = c[1].text_input("Option B")
+                cc = c[0].text_input("Option C")
+                d = c[1].text_input("Option D")
+                e = st.text_input("Option E (optional — Quantitative Reasoning uses five options)")
+                c2 = st.columns(2)
+                correct = c2[0].selectbox("Correct answer", ["A", "B", "C", "D", "E"])
+                diff = c2[1].selectbox("Difficulty", ["Easy", "Medium", "Hard"], index=1)
+                expl = st.text_area("Explanation")
+                if st.form_submit_button("Add question", type="primary"):
+                    if stem and a and b and cc and d:
+                        db.upsert_question({
+                            "subject_id": SUB_BY_NAME[sname]["id"], "stem": stem,
+                            "option_a": a, "option_b": b, "option_c": cc, "option_d": d,
+                            "option_e": e or None,
+                            "correct": correct, "explanation": expl, "difficulty": diff,
+                        })
+                        _invalidate_content_cache()
+                        st.success("Question added.")
+                        st.rerun()
+                    else:
+                        st.warning("Fill in the stem and at least options A–D.")
         st.divider()
         qs = db.get_questions(include_inactive=True)
         search = st.text_input("🔍 Search questions", key="mq_search",
@@ -2145,7 +2230,10 @@ def page_manage():
             with st.expander(f"[{SUB_BY_ID.get(q['subject_id'],{}).get('name','?')}] {q['stem'][:70]}{retired}"):
                 locked = q.get("question_format") == "multi" or q.get("passage_id")
                 edit_key = f"editq_{q['id']}"
-                if locked:
+                if not is_admin:
+                    st.markdown(f"**Correct:** {q['correct']} · **Difficulty:** {q['difficulty']}{retired}")
+                    st.caption(q.get("explanation") or "")
+                elif locked:
                     st.markdown(f"**Correct:** {q['correct']} · **Difficulty:** {q['difficulty']}{retired}")
                     st.caption(q.get("explanation") or "")
                     st.caption("This question is part of a passage set or uses the multi-statement format — "
@@ -2210,19 +2298,23 @@ def page_manage():
 
     # Flashcards
     with tabs[3]:
-        with st.form("add_fc", clear_on_submit=True):
-            st.markdown("**Add a flashcard**")
-            sname = st.selectbox("Subtest", [s["name"] for s in SUBJECTS], key="mfc_sub")
-            front = st.text_area("Front (prompt)")
-            back = st.text_area("Back (answer)")
-            if st.form_submit_button("Add flashcard", type="primary"):
-                if front and back:
-                    db.upsert_flashcard({"subject_id": SUB_BY_NAME[sname]["id"], "front": front, "back": back})
-                    _invalidate_content_cache()
-                    st.success("Flashcard added.")
-                    st.rerun()
-                else:
-                    st.warning("Fill in both sides.")
+        if not is_admin:
+            st.info("🔒 Adding, editing and deleting shared flashcards is limited to admins on this "
+                     "deployment. You can still browse and search the bank below.")
+        else:
+            with st.form("add_fc", clear_on_submit=True):
+                st.markdown("**Add a flashcard**")
+                sname = st.selectbox("Subtest", [s["name"] for s in SUBJECTS], key="mfc_sub")
+                front = st.text_area("Front (prompt)")
+                back = st.text_area("Back (answer)")
+                if st.form_submit_button("Add flashcard", type="primary"):
+                    if front and back:
+                        db.upsert_flashcard({"subject_id": SUB_BY_NAME[sname]["id"], "front": front, "back": back})
+                        _invalidate_content_cache()
+                        st.success("Flashcard added.")
+                        st.rerun()
+                    else:
+                        st.warning("Fill in both sides.")
         st.divider()
         cards = cached_flashcard_bank()
         fc_search = st.text_input("🔍 Search flashcards", key="mfc_search",
@@ -2236,7 +2328,9 @@ def page_manage():
         for fc in _paginate(fc_filtered, "mfc_page"):
             with st.expander(f"[{SUB_BY_ID.get(fc['subject_id'],{}).get('name','?')}] {fc['front'][:70]}"):
                 edit_key = f"editfc_{fc['id']}"
-                if st.session_state.get(edit_key):
+                if not is_admin:
+                    st.markdown(f"**Back:** {fc['back']}")
+                elif st.session_state.get(edit_key):
                     subj_names = [s["name"] for s in SUBJECTS]
                     cur_subj = SUB_BY_ID.get(fc["subject_id"], {}).get("name", subj_names[0])
                     with st.form(f"editform_fc_{fc['id']}"):
@@ -2272,29 +2366,35 @@ def page_manage():
 
     # Topics
     with tabs[4]:
-        with st.form("add_topic", clear_on_submit=True):
-            st.markdown("**Add a review topic**")
-            sname = st.selectbox("Subtest", [s["name"] for s in SUBJECTS], key="mt_sub")
-            name = st.text_input("Topic name")
-            hy = st.checkbox("High-yield ⭐")
-            summary = st.text_input("One-line summary")
-            content = st.text_area("Notes (Markdown supported)", height=160)
-            if st.form_submit_button("Add topic", type="primary"):
-                if name:
-                    db.upsert_topic({"subject_id": SUB_BY_NAME[sname]["id"], "name": name,
-                                     "high_yield": 1 if hy else 0, "summary": summary, "content": content})
-                    _invalidate_content_cache()
-                    st.success("Topic added.")
-                    st.rerun()
-                else:
-                    st.warning("Give the topic a name.")
+        if not is_admin:
+            st.info("🔒 Adding, editing and deleting shared topics is limited to admins on this "
+                     "deployment. You can still browse below.")
+        else:
+            with st.form("add_topic", clear_on_submit=True):
+                st.markdown("**Add a review topic**")
+                sname = st.selectbox("Subtest", [s["name"] for s in SUBJECTS], key="mt_sub")
+                name = st.text_input("Topic name")
+                hy = st.checkbox("High-yield ⭐")
+                summary = st.text_input("One-line summary")
+                content = st.text_area("Notes (Markdown supported)", height=160)
+                if st.form_submit_button("Add topic", type="primary"):
+                    if name:
+                        db.upsert_topic({"subject_id": SUB_BY_NAME[sname]["id"], "name": name,
+                                         "high_yield": 1 if hy else 0, "summary": summary, "content": content})
+                        _invalidate_content_cache()
+                        st.success("Topic added.")
+                        st.rerun()
+                    else:
+                        st.warning("Give the topic a name.")
         st.divider()
         topics_all = cached_topics()
         st.caption(f"{len(topics_all)} topics")
         for t in topics_all:
             with st.expander(f"{'⭐ ' if t['high_yield'] else ''}[{t['subject_name']}] {t['name']}"):
                 edit_key = f"editt_{t['id']}"
-                if st.session_state.get(edit_key):
+                if not is_admin:
+                    st.markdown(t.get("content") or "_No notes._")
+                elif st.session_state.get(edit_key):
                     subj_names = [s["name"] for s in SUBJECTS]
                     cur_subj = t.get("subject_name") if t.get("subject_name") in subj_names else subj_names[0]
                     with st.form(f"editform_t_{t['id']}"):
