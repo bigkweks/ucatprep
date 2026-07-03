@@ -169,7 +169,11 @@ st.set_page_config(
     page_title="UCAT Prep",
     page_icon="🩺",
     layout="wide",
-    initial_sidebar_state="expanded",
+    # "auto" (not "expanded"): Streamlit opens the sidebar by default on wide
+    # screens but starts it closed on narrow/mobile ones. Forcing "expanded"
+    # meant a mobile visitor's first view was the dark sidebar filling the
+    # whole viewport, hiding the top nav and all page content behind it.
+    initial_sidebar_state="auto",
 )
 
 db.init_db()
@@ -227,6 +231,20 @@ button[kind^="secondary"]:hover { border-color: var(--teal) !important; color: v
 [data-testid="stTab"] { color: var(--ink-soft) !important; font-family: var(--sans) !important; }
 [data-testid="stTab"][aria-selected="true"] { color: var(--teal) !important; font-weight: 600 !important; }
 [data-baseweb="tab-highlight"] { background-color: var(--teal) !important; }
+/* On mobile, tabs with several longer labels (e.g. Leaderboard's "Best Mock
+   Score", Manage's five sub-tabs) overflowed Streamlit's tab strip, hiding
+   all but a sliver of the last tab behind a small scroll arrow. Wrapping
+   instead keeps every tab fully visible and readable without needing to
+   discover a horizontal-scroll gesture. */
+@media (max-width: 640px) {
+    [data-baseweb="tab-list"] { flex-wrap: wrap !important; row-gap: 10px !important; gap: 10px 1.1rem !important; }
+    [data-testid="stTab"] { font-size: 14px !important; }
+    /* The highlight bar is positioned assuming a single row, so once tabs
+       wrap it only ever sits under the first row regardless of which tab is
+       active — misleading rather than helpful. The active tab's bold teal
+       text (above) already marks it clearly, so drop the bar on mobile. */
+    [data-baseweb="tab-highlight"] { display: none !important; }
+}
 
 /* Top navigation bar — one continuous bar (matching the sidebar's dark ink),
    gray clickable labels, no emoji */
@@ -235,7 +253,7 @@ button[kind^="secondary"]:hover { border-color: var(--teal) !important; color: v
     padding: 6px 8px; margin-bottom: 22px; box-shadow: 0 2px 6px rgba(0,0,0,0.18);
 }
 .st-key-topnav [data-testid="stHorizontalBlock"] { gap: 2px !important; flex-wrap: nowrap !important; }
-.st-key-topnav [data-testid="column"] { min-width: 0 !important; }
+.st-key-topnav [data-testid="stColumn"] { min-width: 0 !important; }
 .st-key-topnav button {
     border-radius: 8px !important; border: none !important;
     background: transparent !important; color: rgba(239,241,236,0.62) !important;
@@ -254,6 +272,30 @@ button[kind^="secondary"]:hover { border-color: var(--teal) !important; color: v
     background: var(--teal-bright) !important; color: #FFFFFF !important; font-weight: 700 !important;
 }
 .st-key-topnav button[kind="primary"]:hover { background: var(--teal) !important; }
+
+/* Top nav on narrow/mobile viewports: Streamlit gives every column inside a
+   horizontal block a native min-width of ~100% (its own mechanism for
+   stacking columns via wrap on small screens). Combined with the nowrap rule
+   above, all 11 buttons could never fit — they got forced past their min-width
+   and pushed off-screen to the right instead of wrapping, so only the first
+   ("Home") was ever visible. Wrapping into a compact grid here fixes that. */
+@media (max-width: 768px) {
+    .st-key-topnav { padding: 8px; }
+    .st-key-topnav [data-testid="stHorizontalBlock"] {
+        flex-wrap: wrap !important; row-gap: 4px !important;
+    }
+    .st-key-topnav [data-testid="stColumn"] {
+        min-width: calc(25% - 3px) !important; flex: 1 1 calc(25% - 3px) !important;
+    }
+    .st-key-topnav button {
+        font-size: 12px !important; padding: 10px 4px !important; min-height: 42px;
+    }
+}
+@media (max-width: 420px) {
+    .st-key-topnav [data-testid="stColumn"] {
+        min-width: calc(33.333% - 3px) !important; flex: 1 1 calc(33.333% - 3px) !important;
+    }
+}
 .st-key-topnav button p { font-family: var(--sans) !important; font-weight: inherit !important; }
 
 /* Metrics */
