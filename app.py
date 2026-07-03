@@ -561,11 +561,38 @@ page = st.session_state["nav_page"]
 # ════════════════════════════════════════════════════════════════════════════
 def page_dashboard():
     st.title("📊 Dashboard")
-    uid = st.session_state["user_id"]
+    ss = st.session_state
+    uid = ss["user_id"]
     stats = cached_overall_stats(uid)
     acc = (stats["correct"] / stats["attempts"] * 100) if stats["attempts"] else 0
 
     dte, exam_d = days_to_exam()
+
+    # First-time onboarding nudge — only for a genuinely fresh account (no
+    # attempts yet and no exam date set). Dismissal is stored per-account so
+    # it doesn't reappear once acted on or explicitly dismissed.
+    if stats["attempts"] == 0 and dte is None and not db.get_context(uid, "onboarding_dismissed"):
+        with st.container(border=True):
+            st.markdown("#### 👋 New here? Three quick things first")
+            st.markdown(
+                "- **Set your exam date** in ⚙️ Manage — powers the countdown and the study plan.\n"
+                "- **Sit a short diagnostic mock** to see your starting point across all four subtests.\n"
+                "- **Skim the 🧭 UCAT Guide** — a full playbook, worth 15 minutes before diving into practice."
+            )
+            bcols = st.columns(4)
+            if bcols[0].button("⚙️ Set exam date", width="stretch"):
+                ss["nav_page"] = "⚙️ Manage"
+                st.rerun()
+            if bcols[1].button("⏱️ Take a mock", width="stretch"):
+                ss["nav_page"] = "⏱️ Mock Exam"
+                st.rerun()
+            if bcols[2].button("🧭 Read the Guide", width="stretch"):
+                ss["nav_page"] = "🧭 UCAT Guide"
+                st.rerun()
+            if bcols[3].button("Dismiss", width="stretch"):
+                db.set_context(uid, "onboarding_dismissed", "1")
+                st.rerun()
+
     if dte is not None:
         if dte >= 0:
             st.info(f"🗓️ **{dte} days** until your UCAT on **{exam_d.strftime('%B %d, %Y')}**.")
@@ -1118,23 +1145,50 @@ def page_scheduler():
 
     # Auto-generate a plan
     with st.expander("✨ Generate a study plan"):
-        st.caption("Creates one strategy + one practice task per subtest, spread across the days you choose.")
+        st.caption("Creates a Review + Practice + Flashcards task per subtest, spread across the days you choose — "
+                   "with extra practice sessions weighted toward your weakest subtests.")
+        dte, _ = days_to_exam()
+        default_days = min(60, max(3, dte)) if dte and dte > 0 else 14
         gc1, gc2 = st.columns(2)
-        weeks = gc1.number_input("Spread over (days)", 3, 60, 14)
+        weeks = gc1.number_input("Spread over (days)", 3, 60, default_days,
+                                 help="Defaults to your days-until-exam (set in ⚙️ Manage) when available.")
         per_day = gc2.number_input("Tasks per day", 1, 6, 2)
+
+        acc_rows = cached_accuracy_by_subject(uid)
+        attempted = [r for r in acc_rows if r["attempts"]]
+        weak_ids = []
+        if attempted:
+            ranked = sorted(attempted, key=lambda r: r["correct"] / r["attempts"])
+            weak_ids = [r["subject_id"] for r in ranked[:2]]
+            st.caption(f"📉 Extra practice sessions weighted toward your current weak areas: "
+                       f"**{', '.join(SUB_BY_ID[sid]['name'] for sid in weak_ids)}**.")
+
         if st.button("Generate plan"):
             plan_tasks = []
             for s in SUBJECTS:
                 plan_tasks.append((f"Review: {s['name']} high-yield topics", s["id"], "Review"))
                 plan_tasks.append((f"Practice: {s['name']} question set", s["id"], "Practice"))
                 plan_tasks.append((f"Flashcards: {s['name']}", s["id"], "Flashcards"))
-            day = 0
+                if s["id"] in weak_ids:
+                    plan_tasks.append((f"Extra practice: {s['name']} (weak area)", s["id"], "Practice"))
+            # Skip anything already on the plan (by title) so clicking this
+            # more than once doesn't silently pile up duplicate tasks.
+            existing_titles = {t["title"] for t in cached_study_tasks(uid)}
+            added = skipped = 0
             for i, (title, sid, ttype) in enumerate(plan_tasks):
+                if title in existing_titles:
+                    skipped += 1
+                    continue
                 due = date.today() + timedelta(days=int(i // per_day) % int(weeks))
                 db.upsert_study_task(uid, {"title": title, "subject_id": sid, "task_type": ttype,
                                            "due_date": due.isoformat(), "duration_min": 60})
+                added += 1
             _invalidate_tasks_cache()
-            st.success(f"Generated {len(plan_tasks)} tasks.")
+            if added:
+                extra = f" ({skipped} already on your plan, skipped)" if skipped else ""
+                st.success(f"Generated {added} new task(s){extra}.")
+            else:
+                st.info("Everything from this plan is already on your list — nothing new to add.")
             st.rerun()
 
     filt = st.radio("Show", ["All", "Todo", "In Progress", "Done"], horizontal=True)
@@ -1902,7 +1956,12 @@ def page_content():
                 if t.get("summary"):
                     st.caption(t["summary"])
                 st.markdown(t.get("content") or "_No notes yet._")
-                st.caption("💬 Ask the AI Tutor about this topic from the 🤖 AI Tutor page.")
+                if st.button("💬 Ask the AI Tutor about this", key=f"asktutor_{t['id']}"):
+                    st.session_state["tutor_prefill"] = (
+                        f'Can you help me understand "{t["name"]}"? {t.get("summary") or ""}'
+                    ).strip()
+                    st.session_state["nav_page"] = "🤖 AI Tutor"
+                    st.rerun()
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1919,6 +1978,28 @@ SYSTEM_PROMPT = (
     "quantitative problems step by step, and when relevant point out common UCAT traps and "
     "time-saving shortcuts. Keep answers focused and exam-oriented."
 )
+
+
+def _tutor_context_line(uid):
+    """A short, current snapshot of the student's own performance, folded into
+    the system prompt so the tutor can ground advice in their actual weak
+    areas and timeline instead of staying entirely generic."""
+    parts = []
+    dte, _ = days_to_exam()
+    if dte is not None and dte >= 0:
+        parts.append(f"{dte} days until their UCAT")
+    attempted = [r for r in cached_accuracy_by_subject(uid) if r["attempts"]]
+    if attempted:
+        weakest = min(attempted, key=lambda r: r["correct"] / r["attempts"])
+        weak_acc = weakest["correct"] / weakest["attempts"] * 100
+        parts.append(f"weakest subtest so far is {weakest['subject_name']} ({weak_acc:.0f}% accuracy)")
+    n_mistakes = len(cached_mistake_ids(uid))
+    if n_mistakes:
+        parts.append(f"{n_mistakes} unresolved question(s) in their Mistakes Bank")
+    if not parts:
+        return ""
+    return ("Student context: " + "; ".join(parts) + ". Use this to tailor advice when it's relevant "
+            "(e.g. suggesting what to prioritise), but still answer whatever they actually ask.")
 
 
 def page_tutor():
@@ -1944,7 +2025,14 @@ def page_tutor():
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
 
+    # A "Ask the AI Tutor about this" click from Strategy & Skills lands here
+    # with a starter question already queued — send it once, automatically,
+    # rather than making the student retype what they were just reading.
+    prefill = st.session_state.pop("tutor_prefill", None)
     prompt = st.chat_input("e.g. Explain the difference between competitive and noncompetitive inhibition")
+    if prefill and not prompt:
+        prompt = prefill
+
     if prompt:
         db.save_message(uid, "user", prompt)
         with st.chat_message("user"):
@@ -1953,11 +2041,15 @@ def page_tutor():
             try:
                 client = anthropic.Anthropic(api_key=api_key)
                 msgs = [{"role": m["role"], "content": m["content"]} for m in db.get_chat_history(uid, 20)]
+                system_prompt = SYSTEM_PROMPT
+                ctx = _tutor_context_line(uid)
+                if ctx:
+                    system_prompt = f"{SYSTEM_PROMPT}\n\n{ctx}"
                 with st.spinner("Thinking…"):
                     resp = client.messages.create(
                         model="claude-opus-4-8",
                         max_tokens=1200,
-                        system=SYSTEM_PROMPT,
+                        system=system_prompt,
                         messages=msgs,
                     )
                 answer = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
@@ -2051,12 +2143,70 @@ def page_manage():
         for q in _paginate(filtered, "mq_page"):
             retired = "" if (q.get("active") in (1, None)) else " · 🚫 retired"
             with st.expander(f"[{SUB_BY_ID.get(q['subject_id'],{}).get('name','?')}] {q['stem'][:70]}{retired}"):
-                st.markdown(f"**Correct:** {q['correct']} · **Difficulty:** {q['difficulty']}{retired}")
-                st.caption(q.get("explanation") or "")
-                if st.button("Delete", key=f"delq_{q['id']}"):
-                    db.delete_question(q["id"])
-                    _invalidate_content_cache()
-                    st.rerun()
+                locked = q.get("question_format") == "multi" or q.get("passage_id")
+                edit_key = f"editq_{q['id']}"
+                if locked:
+                    st.markdown(f"**Correct:** {q['correct']} · **Difficulty:** {q['difficulty']}{retired}")
+                    st.caption(q.get("explanation") or "")
+                    st.caption("This question is part of a passage set or uses the multi-statement format — "
+                               "editing those isn't supported here yet. You can still delete it.")
+                    if st.button("Delete", key=f"delq_{q['id']}"):
+                        db.delete_question(q["id"])
+                        _invalidate_content_cache()
+                        st.rerun()
+                elif st.session_state.get(edit_key):
+                    subj_names = [s["name"] for s in SUBJECTS]
+                    cur_subj = SUB_BY_ID.get(q["subject_id"], {}).get("name", subj_names[0])
+                    with st.form(f"editform_q_{q['id']}"):
+                        sname_e = st.selectbox("Subtest", subj_names,
+                                                index=subj_names.index(cur_subj) if cur_subj in subj_names else 0,
+                                                key=f"eq_sub_{q['id']}")
+                        stem_e = st.text_area("Question stem", value=q["stem"], key=f"eq_stem_{q['id']}")
+                        c = st.columns(2)
+                        a_e = c[0].text_input("Option A", value=q.get("option_a") or "", key=f"eq_a_{q['id']}")
+                        b_e = c[1].text_input("Option B", value=q.get("option_b") or "", key=f"eq_b_{q['id']}")
+                        c_e = c[0].text_input("Option C", value=q.get("option_c") or "", key=f"eq_c_{q['id']}")
+                        d_e = c[1].text_input("Option D", value=q.get("option_d") or "", key=f"eq_d_{q['id']}")
+                        e_e = st.text_input("Option E (optional)", value=q.get("option_e") or "", key=f"eq_e_{q['id']}")
+                        c2 = st.columns(2)
+                        letters = ["A", "B", "C", "D", "E"]
+                        correct_e = c2[0].selectbox("Correct answer", letters,
+                                                     index=letters.index(q["correct"]) if q["correct"] in letters else 0,
+                                                     key=f"eq_cor_{q['id']}")
+                        diffs = ["Easy", "Medium", "Hard"]
+                        diff_e = c2[1].selectbox("Difficulty", diffs,
+                                                  index=diffs.index(q["difficulty"]) if q["difficulty"] in diffs else 1,
+                                                  key=f"eq_diff_{q['id']}")
+                        expl_e = st.text_area("Explanation", value=q.get("explanation") or "", key=f"eq_expl_{q['id']}")
+                        fc1, fc2 = st.columns(2)
+                        if fc1.form_submit_button("Save changes", type="primary"):
+                            if stem_e and a_e and b_e and c_e and d_e:
+                                db.upsert_question({
+                                    "id": q["id"], "subject_id": SUB_BY_NAME[sname_e]["id"], "stem": stem_e,
+                                    "option_a": a_e, "option_b": b_e, "option_c": c_e, "option_d": d_e,
+                                    "option_e": e_e or None, "correct": correct_e, "explanation": expl_e,
+                                    "difficulty": diff_e,
+                                })
+                                _invalidate_content_cache()
+                                st.session_state[edit_key] = False
+                                st.success("Saved.")
+                                st.rerun()
+                            else:
+                                st.warning("Fill in the stem and at least options A–D.")
+                        if fc2.form_submit_button("Cancel"):
+                            st.session_state[edit_key] = False
+                            st.rerun()
+                else:
+                    st.markdown(f"**Correct:** {q['correct']} · **Difficulty:** {q['difficulty']}{retired}")
+                    st.caption(q.get("explanation") or "")
+                    bcol1, bcol2 = st.columns(2)
+                    if bcol1.button("Edit", key=f"editbtn_q_{q['id']}"):
+                        st.session_state[edit_key] = True
+                        st.rerun()
+                    if bcol2.button("Delete", key=f"delq_{q['id']}"):
+                        db.delete_question(q["id"])
+                        _invalidate_content_cache()
+                        st.rerun()
 
     # Flashcards
     with tabs[3]:
@@ -2085,11 +2235,40 @@ def page_manage():
         st.caption(f"{len(fc_filtered)} of {len(cards)} flashcards" if fc_search else f"{len(cards)} flashcards")
         for fc in _paginate(fc_filtered, "mfc_page"):
             with st.expander(f"[{SUB_BY_ID.get(fc['subject_id'],{}).get('name','?')}] {fc['front'][:70]}"):
-                st.markdown(f"**Back:** {fc['back']}")
-                if st.button("Delete", key=f"delfc_{fc['id']}"):
-                    db.delete_flashcard(fc["id"])
-                    _invalidate_content_cache()
-                    st.rerun()
+                edit_key = f"editfc_{fc['id']}"
+                if st.session_state.get(edit_key):
+                    subj_names = [s["name"] for s in SUBJECTS]
+                    cur_subj = SUB_BY_ID.get(fc["subject_id"], {}).get("name", subj_names[0])
+                    with st.form(f"editform_fc_{fc['id']}"):
+                        sname_e = st.selectbox("Subtest", subj_names,
+                                                index=subj_names.index(cur_subj) if cur_subj in subj_names else 0,
+                                                key=f"efc_sub_{fc['id']}")
+                        front_e = st.text_area("Front (prompt)", value=fc["front"], key=f"efc_front_{fc['id']}")
+                        back_e = st.text_area("Back (answer)", value=fc["back"], key=f"efc_back_{fc['id']}")
+                        fc1, fc2 = st.columns(2)
+                        if fc1.form_submit_button("Save changes", type="primary"):
+                            if front_e and back_e:
+                                db.upsert_flashcard({"id": fc["id"], "subject_id": SUB_BY_NAME[sname_e]["id"],
+                                                     "front": front_e, "back": back_e})
+                                _invalidate_content_cache()
+                                st.session_state[edit_key] = False
+                                st.success("Saved.")
+                                st.rerun()
+                            else:
+                                st.warning("Fill in both sides.")
+                        if fc2.form_submit_button("Cancel"):
+                            st.session_state[edit_key] = False
+                            st.rerun()
+                else:
+                    st.markdown(f"**Back:** {fc['back']}")
+                    bcol1, bcol2 = st.columns(2)
+                    if bcol1.button("Edit", key=f"editbtn_fc_{fc['id']}"):
+                        st.session_state[edit_key] = True
+                        st.rerun()
+                    if bcol2.button("Delete", key=f"delfc_{fc['id']}"):
+                        db.delete_flashcard(fc["id"])
+                        _invalidate_content_cache()
+                        st.rerun()
 
     # Topics
     with tabs[4]:
@@ -2114,11 +2293,44 @@ def page_manage():
         st.caption(f"{len(topics_all)} topics")
         for t in topics_all:
             with st.expander(f"{'⭐ ' if t['high_yield'] else ''}[{t['subject_name']}] {t['name']}"):
-                st.markdown(t.get("content") or "_No notes._")
-                if st.button("Delete", key=f"delt_{t['id']}"):
-                    db.delete_topic(t["id"])
-                    _invalidate_content_cache()
-                    st.rerun()
+                edit_key = f"editt_{t['id']}"
+                if st.session_state.get(edit_key):
+                    subj_names = [s["name"] for s in SUBJECTS]
+                    cur_subj = t.get("subject_name") if t.get("subject_name") in subj_names else subj_names[0]
+                    with st.form(f"editform_t_{t['id']}"):
+                        sname_e = st.selectbox("Subtest", subj_names, index=subj_names.index(cur_subj),
+                                                key=f"et_sub_{t['id']}")
+                        name_e = st.text_input("Topic name", value=t["name"], key=f"et_name_{t['id']}")
+                        hy_e = st.checkbox("High-yield ⭐", value=bool(t["high_yield"]), key=f"et_hy_{t['id']}")
+                        summary_e = st.text_input("One-line summary", value=t.get("summary") or "",
+                                                   key=f"et_sum_{t['id']}")
+                        content_e = st.text_area("Notes (Markdown supported)", value=t.get("content") or "",
+                                                  height=160, key=f"et_content_{t['id']}")
+                        fc1, fc2 = st.columns(2)
+                        if fc1.form_submit_button("Save changes", type="primary"):
+                            if name_e:
+                                db.upsert_topic({"id": t["id"], "subject_id": SUB_BY_NAME[sname_e]["id"],
+                                                 "name": name_e, "high_yield": 1 if hy_e else 0,
+                                                 "summary": summary_e, "content": content_e})
+                                _invalidate_content_cache()
+                                st.session_state[edit_key] = False
+                                st.success("Saved.")
+                                st.rerun()
+                            else:
+                                st.warning("Give the topic a name.")
+                        if fc2.form_submit_button("Cancel"):
+                            st.session_state[edit_key] = False
+                            st.rerun()
+                else:
+                    st.markdown(t.get("content") or "_No notes._")
+                    bcol1, bcol2 = st.columns(2)
+                    if bcol1.button("Edit", key=f"editbtn_t_{t['id']}"):
+                        st.session_state[edit_key] = True
+                        st.rerun()
+                    if bcol2.button("Delete", key=f"delt_{t['id']}"):
+                        db.delete_topic(t["id"])
+                        _invalidate_content_cache()
+                        st.rerun()
 
 
 # ════════════════════════════════════════════════════════════════════════════
