@@ -1275,6 +1275,40 @@ def page_guide():
 
     st.divider()
 
+    # ── Contents ─────────────────────────────────────────────────────────────
+    # Streamlit auto-generates an id (slugified from the heading text) on every
+    # st.header/st.subheader, so plain in-page anchor links work here with no
+    # extra JS — this list must be kept in sync with the section headers below.
+    st.markdown("#### Contents")
+    _guide_toc = [
+        ("01", "The exam at a glance", "the-exam-at-a-glance"),
+        ("02", "Applying: registration, fees & your UCAS timeline",
+         "applying-registration-fees-and-your-ucas-timeline"),
+        ("03", "Scoring & what actually counts as good", "scoring-and-what-actually-counts-as-good"),
+        ("04–07", "Subtest deep dives", "subtest-deep-dives"),
+        ("08", "The interface & the timing doctrine", "the-interface-and-the-timing-doctrine"),
+        ("09", "The preparation plan", "the-preparation-plan"),
+        ("10", "Resources, ranked by usefulness", "resources-ranked-by-usefulness"),
+        ("11", "Exam day", "exam-day"),
+        ("12", "After the test: results, applying with your score & what's next",
+         "after-the-test-results-applying-with-your-score-and-whats-next"),
+        ("13", "The eleven commandments", "the-eleven-commandments"),
+    ]
+    toc_cols = st.columns(2)
+    half = (len(_guide_toc) + 1) // 2
+    for col, chunk in zip(toc_cols, (_guide_toc[:half], _guide_toc[half:])):
+        with col:
+            for num, title, anchor in chunk:
+                st.markdown(
+                    f"<a href='#{anchor}' style='text-decoration:none;display:block;padding:.25rem 0'>"
+                    f"<span style='font-family:var(--mono);color:var(--teal,#0C6B58);font-weight:700;"
+                    f"margin-right:.6rem'>{num}</span>"
+                    f"<span style='color:var(--ink,#16211F)'>{title}</span></a>",
+                    unsafe_allow_html=True,
+                )
+
+    st.divider()
+
     # ── 01 · Format ──────────────────────────────────────────────────────────
     st.markdown("`01`")
     st.header("The exam at a glance")
@@ -1305,8 +1339,76 @@ def page_guide():
 
     st.divider()
 
-    # ── 02 · Scoring ─────────────────────────────────────────────────────────
+    # ── 02 · Application process ─────────────────────────────────────────────
     st.markdown("`02`")
+    st.header("Applying: registration, fees & your UCAS timeline")
+    st.markdown(
+        "Sitting the UCAT is one step inside a wider application — and the admin around it (registering, "
+        "booking, paying, and fitting it around UCAS) has its own deadlines that are easy to miss if you're "
+        "focused purely on revision. Here's the process end to end."
+    )
+    application_steps = [
+        ("Confirm you need it & shortlist courses", "Check every target school's requirement",
+         "The UCAT is required by most UK medicine and dentistry courses (and some other health courses), but "
+         "requirements, weighting and score thresholds vary by university — some set hard cut-offs, some rank, "
+         "some combine it with grades. Check each target school's current published policy before you register, "
+         "since it shapes what score you're actually aiming for."),
+        ("Register on the official UCAT website", "One account, exact personal details",
+         "Registration opens in the spring and closes in the autumn each cycle — create your account at "
+         "ucat.ac.uk and enter your details **exactly** as they'll appear on your UCAS application. A mismatched "
+         "name or date of birth is a common, avoidable source of admin problems later."),
+        ("Book your test slot", "Pick a centre and a date inside the testing window",
+         "Choose a Pearson VUE test centre and a slot within the annual testing window. Earlier slots mean "
+         "you'll know your provisional score sooner and can make an informed choice of universities — but weigh "
+         "that against having enough time to actually prepare."),
+        ("Pay the fee, or apply for the bursary", "There's a means-tested bursary if you qualify",
+         "There's a sitting fee (higher outside the UK/EU), but a bursary scheme can cover some or all of it for "
+         "eligible candidates. The bursary has its **own, earlier window** — check eligibility and apply well "
+         "before general registration closes, not after."),
+        ("Apply for access arrangements if you need them", "Extra time or rest breaks — arranged in advance",
+         "Reasonable adjustments (extra time, rest breaks, and more) are available for eligible candidates, but "
+         "must be requested with supporting evidence **before** you book — this is not something you can ask "
+         "for on the day."),
+        ("Sit the test", "Right ID, right details, on the day",
+         "Bring photo ID that matches your registration details exactly. See **Exam day** below for the "
+         "on-the-day logistics and mindset."),
+        ("See your provisional score immediately", "Official release to universities comes later",
+         "Your raw scores for the cognitive subtests are shown on-screen the moment you finish (SJT is not "
+         "scored live). Treat this as provisional — the **official** results reach your chosen universities "
+         "later in the cycle."),
+        ("Submit your UCAS choices using last year's thresholds", "You'll choose schools before anyone sees your score",
+         "UCAS choices for medicine and dentistry are typically due **before** universities receive official "
+         "UCAT results, so you're picking schools based on **published prior-year** thresholds and how each one "
+         "uses the UCAT — not your actual score."),
+        ("Know the retake rule", "One sitting per cycle",
+         "You can only sit the UCAT **once per annual cycle**. If your score isn't what you hoped for, the next "
+         "opportunity is the following year's cycle, as a new application."),
+    ]
+    for i, (title, tagline, body) in enumerate(application_steps, start=1):
+        c1, c2 = st.columns([1, 11])
+        c1.markdown(
+            f"<div style='width:2.2rem;height:2.2rem;border-radius:50%;background:var(--teal,#0C6B58);"
+            f"color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700'>{i}</div>",
+            unsafe_allow_html=True,
+        )
+        with c2:
+            st.markdown(f"**{title}** — {tagline}")
+            st.markdown(body)
+    st.info(
+        "**What you'll need on hand when you register:** a valid passport or photo ID to confirm your identity, "
+        "your UCAS details (so your name/DOB match exactly), and a payment method — or your bursary evidence if "
+        "you're applying for financial support."
+    )
+    st.caption(
+        "Registration windows, fees, bursary thresholds and test-centre availability change slightly every "
+        "cycle — confirm the current year's exact dates and amounts at "
+        "[ucat.ac.uk](https://www.ucat.ac.uk) before you register."
+    )
+
+    st.divider()
+
+    # ── 03 · Scoring ─────────────────────────────────────────────────────────
+    st.markdown("`03`")
     st.header("Scoring & what actually counts as good")
     st.markdown(
         "Raw marks in VR, DM and QR are converted to a scaled 300–900 each and summed to a total out of 2700. "
@@ -1363,8 +1465,8 @@ def page_guide():
 
     st.divider()
 
-    # ── 03-06 · Subtest deep dives ───────────────────────────────────────────
-    st.markdown("`03–06`")
+    # ── 04-07 · Subtest deep dives ───────────────────────────────────────────
+    st.markdown("`04–07`")
     st.header("Subtest deep dives")
     tab_vr, tab_dm, tab_qr, tab_sjt = st.tabs(["📖 Verbal Reasoning", "🧩 Decision Making",
                                                 "🔢 Quantitative Reasoning", "🩺 Situational Judgement"])
@@ -1494,8 +1596,8 @@ def page_guide():
 
     st.divider()
 
-    # ── 07 · Timing doctrine ─────────────────────────────────────────────────
-    st.markdown("`07`")
+    # ── 08 · Timing doctrine ─────────────────────────────────────────────────
+    st.markdown("`08`")
     st.header("The interface & the timing doctrine")
     st.markdown(
         "More points are lost to the clock than to difficulty. The single biggest score lever for most "
@@ -1532,8 +1634,8 @@ def page_guide():
 
     st.divider()
 
-    # ── 08 · Preparation plan ────────────────────────────────────────────────
-    st.markdown("`08`")
+    # ── 09 · Preparation plan ────────────────────────────────────────────────
+    st.markdown("`09`")
     st.header("The preparation plan")
     st.markdown(
         "Six to eight focused weeks beats months of drift. The pattern that works: learn the technique first, "
@@ -1573,8 +1675,8 @@ def page_guide():
 
     st.divider()
 
-    # ── 09 · Resources ───────────────────────────────────────────────────────
-    st.markdown("`09`")
+    # ── 10 · Resources ───────────────────────────────────────────────────────
+    st.markdown("`10`")
     st.header("Resources, ranked by usefulness")
     st.markdown(
         "Start with the free official material for accuracy, add a question bank for volume, and use timed "
@@ -1614,8 +1716,8 @@ def page_guide():
 
     st.divider()
 
-    # ── 10 · Exam day ────────────────────────────────────────────────────────
-    st.markdown("`10`")
+    # ── 11 · Exam day ────────────────────────────────────────────────────────
+    st.markdown("`11`")
     st.header("Exam day")
     st.markdown(
         "By now the technique is built — the job is to protect it from nerves and logistics. Nothing on the "
@@ -1645,8 +1747,102 @@ def page_guide():
 
     st.divider()
 
-    # ── 11 · Mindset ─────────────────────────────────────────────────────────
-    st.markdown("`11`")
+    # ── 12 · After the test ──────────────────────────────────────────────────
+    st.markdown("`12`")
+    st.header("After the test: results, applying with your score, and what's next")
+    st.markdown(
+        "Finishing the UCAT is one milestone — what you do with the result is the next one. Here's when you'll "
+        "actually see numbers, how universities tend to use them, and a rough steer on where a given score "
+        "tends to be competitive."
+    )
+
+    st.markdown("#### When you get your results")
+    _g_block("Timeline", "#0C6B58", [
+        "**The moment you finish**, your raw scores for the three cognitive subtests (VR, DM, QR) are shown "
+        "on-screen and scaled to 300–900 each — SJT is not scored live.",
+        "You'll also receive your own **statement of results** shortly after.",
+        "**Official results reach your chosen universities later**, in a batch, well after most candidates have "
+        "already sat the test — so for a while, only you know your score.",
+    ])
+
+    st.markdown("#### How universities actually use your score")
+    st.caption(
+        "There's no single system — schools broadly fall into three approaches. The named examples below are "
+        "recently published figures for illustration, **not confirmed current-cycle numbers** — always check "
+        "each university's own current entry requirements before relying on any of this."
+    )
+    usage_modes = [
+        ("THRESHOLD", "A hard minimum to clear", "Below the line, the application typically doesn't progress "
+         "further regardless of everything else — but clearing it doesn't rank you within the group above it. "
+         "*Recent published example: Keele has stated a total UCAT score below roughly 1700, or an SJT Band 4, "
+         "would not be considered.*"),
+        ("RANKING", "Sorted by score among qualifiers", "Candidates who meet the academic entry requirements are "
+         "then ordered by UCAT score — e.g. for interview invitations — so within this group, a higher score "
+         "directly beats a lower one. *Recent published example: Sheffield has ranked qualifying candidates by "
+         "UCAT score, with a stated total threshold of roughly 1800.*"),
+        ("WEIGHTED", "Blended with grades and other factors", "UCAT is one ingredient in a combined score rather "
+         "than a standalone bar, so a slightly lower UCAT can be offset by other strengths. *Recent published "
+         "example: Exeter has weighted UCAT at roughly 25% of shortlisting, academic performance the "
+         "remaining 75%, with no fixed minimum score.*"),
+    ]
+    for badge, title, body in usage_modes:
+        with st.container(border=True):
+            c1, c2 = st.columns([1, 6])
+            c1.markdown(
+                f"<span style='font-family:var(--mono);font-size:.62rem;letter-spacing:.08em;font-weight:700;"
+                f"color:#fff;background:var(--teal,#0C6B58);padding:.2rem .45rem;border-radius:5px;"
+                f"white-space:nowrap'>{badge}</span>", unsafe_allow_html=True,
+            )
+            with c2:
+                st.markdown(f"**{title}**")
+                st.caption(body)
+
+    with st.container(border=True):
+        st.markdown("#### What does your score suggest?")
+        st.caption(
+            "A quick, rough steer — not an offer prediction. Enter your total to see where it sits and which of "
+            "the illustrative thresholds above it would have cleared."
+        )
+        post_score = st.number_input("Your total score (out of 2700)", 1200, 2700, 1880, 10, key="post_ucat_score")
+        pct = _score_percentile(post_score)
+        tier, desc = _score_tier(post_score)
+        st.markdown(f"**{tier}** — {desc} ~{pct}th percentile.")
+        cleared = [name for name, threshold in
+                   (("Keele's ~1700 example", 1700), ("Sheffield's ~1800 example", 1800))
+                   if post_score >= threshold]
+        if cleared:
+            st.caption(f"✅ Would have cleared: {', '.join(cleared)}. Weighted schools like Exeter's example "
+                       "have no fixed line to clear either way.")
+        else:
+            st.caption("This wouldn't have cleared either illustrative threshold example above — weighted-approach "
+                       "schools (no fixed minimum) are usually the more realistic reach at this level, alongside "
+                       "a broader, carefully chosen list.")
+        st.caption("Purely illustrative against two example figures from a recent cycle — not a real-time lookup "
+                   "against this year's actual requirements.")
+
+    st.markdown("#### If it didn't go the way you hoped")
+    _g_block("Your options", "#0C6B58", [
+        "**Apply broadly, not just to reach schools** — mix threshold, ranking and weighted-approach schools so "
+        "your list isn't all long shots.",
+        "**Look at Gateway/Foundation year courses** — several schools run widening-access programmes with an "
+        "extra foundation year and different (often lower or contextual) UCAT requirements.",
+        "**Retake next cycle if it's the right call** — you can't resit within the same cycle (see the "
+        "application process above), so treat a retake as a deliberate, prepared decision for next year rather "
+        "than a default.",
+        "**Had something go wrong on the day?** Most universities accept extenuating-circumstances claims (illness, "
+        "a disrupted test session, etc.) with supporting evidence, submitted promptly and directly to each "
+        "university — this doesn't change your UCAT score itself, but can change how it's read.",
+    ])
+    st.caption(
+        "Thresholds, weightings and even which category a university falls into can change every cycle. Confirm "
+        "current requirements directly with each university and at [ucat.ac.uk](https://www.ucat.ac.uk) before "
+        "finalising your list."
+    )
+
+    st.divider()
+
+    # ── 13 · Mindset ─────────────────────────────────────────────────────────
+    st.markdown("`13`")
     st.header("The eleven commandments")
     st.markdown("Everything above, distilled. If you internalise nothing else, internalise these.")
     commandments = [
@@ -1944,6 +2140,19 @@ def _build_mock(subtest_ids):
     return questions, int(budget)
 
 
+def _mock_subtest_ranges(quiz):
+    """(subject_id, start_idx, end_idx_exclusive) for each contiguous subtest
+    block in the flat mock question list, in the order they appear. _build_mock
+    appends whole subtests one after another, so each one is always contiguous."""
+    ranges = []
+    start = 0
+    for i in range(1, len(quiz) + 1):
+        if i == len(quiz) or quiz[i]["subject_id"] != quiz[start]["subject_id"]:
+            ranges.append((quiz[start]["subject_id"], start, i))
+            start = i
+    return ranges
+
+
 def _finish_mock(ss, elapsed):
     """Record every answered question to analytics once, then flip to the results screen."""
     if not ss.get("mock_graded"):
@@ -2080,18 +2289,28 @@ def page_mock():
             ss["mock_times"] = {}
             ss["mock_q_start"] = {}
             ss["mock_budget"] = budget
-            ss["mock_start"] = datetime.now().timestamp()
+            # Elapsed time is tracked as accumulated-so-far + time since the
+            # current running segment began, rather than a single start
+            # timestamp, so pausing can freeze the clock (see the Pause/Resume
+            # handling below) instead of the exam continuing to run in the
+            # background while a student is away.
+            ss["mock_elapsed_accum"] = 0.0
+            ss["mock_segment_start"] = datetime.now().timestamp()
+            ss["mock_paused"] = False
             st.rerun()
         return
 
     # ── In-progress exam ──────────────────────────────────────────────────────
     quiz = ss["mock"]
     budget = ss["mock_budget"]
-    elapsed = datetime.now().timestamp() - ss["mock_start"]
+    now = datetime.now().timestamp()
+    paused = ss.get("mock_paused", False)
+    elapsed = ss["mock_elapsed_accum"] if paused else ss["mock_elapsed_accum"] + (now - ss["mock_segment_start"])
     remaining = budget - elapsed
 
-    # Time's up → grade automatically
-    if remaining <= 0:
+    # Time's up → grade automatically (not while paused: the clock is frozen,
+    # so remaining can't have genuinely run out during a pause)
+    if remaining <= 0 and not paused:
         _finish_mock(ss, budget)
         st.rerun()
 
@@ -2100,10 +2319,26 @@ def page_mock():
         _finish_mock(ss, elapsed)
         st.rerun()
 
+    # ── Paused screen ────────────────────────────────────────────────────────
+    if paused:
+        st.info(f"⏸ **Mock paused** — {fmt_mmss(remaining)} remaining · on question {idx + 1} of {len(quiz)}.")
+        st.caption("The clock and your progress are frozen. Resume whenever you're ready to continue.")
+        if st.button("▶️ Resume", type="primary"):
+            pause_duration = datetime.now().timestamp() - ss.get("mock_paused_since", now)
+            # Shift every recorded question-start timestamp forward by the
+            # pause duration so the per-question pace stats computed later
+            # don't count time spent paused as time spent thinking.
+            for k in ss.get("mock_q_start", {}):
+                ss["mock_q_start"][k] += pause_duration
+            ss["mock_segment_start"] = datetime.now().timestamp()
+            ss["mock_paused"] = False
+            st.rerun()
+        return
+
     ss.setdefault("mock_q_start", {}).setdefault(idx, datetime.now().timestamp())
 
-    # Header: live countdown (cosmetic client-side ticker) + progress
-    top = st.columns([2, 3])
+    # Header: live countdown (cosmetic client-side ticker) + progress + pause
+    top = st.columns([2, 3, 1])
     with top[0]:
         components.html(f"""
             <div id='ucat-timer' style="font:600 26px/1.2 -apple-system,Segoe UI,Roboto,sans-serif;
@@ -2121,6 +2356,28 @@ def page_mock():
         """, height=44)
     with top[1]:
         st.progress(idx / len(quiz), text=f"Question {idx + 1} of {len(quiz)}")
+    with top[2]:
+        if st.button("⏸ Pause", width="stretch"):
+            ss["mock_elapsed_accum"] = elapsed
+            ss["mock_paused_since"] = datetime.now().timestamp()
+            ss["mock_paused"] = True
+            st.rerun()
+
+    # Subtest navigator — jump straight to any subtest's first question,
+    # rather than only stepping one question at a time via Back/Skip/Next.
+    # Only shown for a full mock; a single-subtest mock has nothing to jump to.
+    ranges = _mock_subtest_ranges(quiz)
+    if len(ranges) > 1:
+        nav_cols = st.columns(len(ranges))
+        for col, (sid, start, end) in zip(nav_cols, ranges):
+            sub = SUB_BY_ID[sid]
+            answered = sum(1 for i in range(start, end) if ss["mock_answers"].get(i) is not None)
+            active = start <= idx < end
+            with col:
+                if st.button(f"{sub['name']} ({answered}/{end - start})", key=f"mockjump_{sid}",
+                             type="primary" if active else "secondary", width="stretch"):
+                    ss["mock_idx"] = start
+                    st.rerun()
 
     q = quiz[idx]
     sub = SUB_BY_ID.get(q["subject_id"])
