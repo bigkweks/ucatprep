@@ -1609,6 +1609,23 @@ def get_accuracy_by_subject(user_id):
         _close(conn)
 
 
+def get_mock_summary(user_id):
+    """Count and best score of a user's past full mocks, so the Mock Exam
+    setup page can show a quick "you've done this before" stat instead of
+    a bare form with nothing else on it."""
+    ph = _ph()
+    conn = get_conn()
+    try:
+        row = _q1(conn, f"""
+            SELECT COUNT(*) AS n,
+                   MAX(CAST(correct AS FLOAT) / NULLIF(total, 0)) AS best_pct
+            FROM mock_results WHERE user_id = {ph}
+        """, (user_id,))
+        return {"count": row["n"] or 0, "best_pct": (row["best_pct"] or 0) * 100}
+    finally:
+        _close(conn)
+
+
 def get_attempts_over_time(user_id, days=30):
     ph = _ph()
     start = (date.today() - timedelta(days=days)).isoformat()
@@ -1663,6 +1680,22 @@ def get_leaderboard_questions_answered():
         """)
     finally:
         _close(conn)
+
+
+def get_questions_answered_percentile(user_id):
+    """Where this user ranks among everyone who's answered at least one
+    question, by total questions answered — surfaced on the Dashboard so a
+    student sees how they compare without having to visit the Leaderboard
+    tab. Returns None if there isn't a real cohort yet (fewer than 3 other
+    students with attempts), since "you beat 100% of 1 other person" isn't a
+    meaningful stat."""
+    rows = get_leaderboard_questions_answered()
+    others = [r for r in rows if r["user_id"] != user_id]
+    if len(others) < 3:
+        return None
+    mine = next((r["value"] for r in rows if r["user_id"] == user_id), 0)
+    behind = sum(1 for r in others if r["value"] <= mine)
+    return round(behind / len(others) * 100)
 
 
 def get_leaderboard_pace(min_attempts=50):
@@ -1740,10 +1773,10 @@ def get_overall_stats(user_id):
 # ── Seed content ───────────────────────────────────────────────────────────────
 
 _SUBJECTS = [
-    ("VR",  "Verbal Reasoning",       "#3B6488", 1),
-    ("DM",  "Decision Making",        "#6E5299", 2),
-    ("QR",  "Quantitative Reasoning", "#12795C", 3),
-    ("SJT", "Situational Judgement",  "#B06A2C", 4),
+    ("VR",  "Verbal Reasoning",       "#3D5A80", 1),
+    ("DM",  "Decision Making",        "#5B4B7A", 2),
+    ("QR",  "Quantitative Reasoning", "#3A6B58", 3),
+    ("SJT", "Situational Judgement",  "#8A6A3D", 4),
 ]
 
 # topics: (subject_code, name, high_yield, summary, content)

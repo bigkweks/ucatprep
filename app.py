@@ -238,11 +238,28 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
 [data-testid="stSidebar"] button[kind^="secondary"]:hover { background: rgba(255,255,255,0.14) !important; border-color: var(--teal-bright) !important; }
 [data-testid="stSidebar"] button[kind^="secondary"] p { color: var(--paper) !important; }
 
-/* Buttons */
-button[kind^="primary"] { background: var(--teal) !important; border: 1px solid var(--teal) !important; color: #fff !important; border-radius: 8px !important; font-weight: 600 !important; }
+/* Buttons — subtle press feedback (scale down slightly on click) gives
+   tactile confirmation that a tap registered, which matters more on the
+   touch devices this app is mostly used on than it does on desktop. */
+button[kind^="primary"] { background: var(--teal) !important; border: 1px solid var(--teal) !important; color: #fff !important; border-radius: 8px !important; font-weight: 600 !important; transition: background .15s ease, border-color .15s ease, transform .08s ease !important; }
 button[kind^="primary"]:hover { background: var(--teal-bright) !important; border-color: var(--teal-bright) !important; }
-button[kind^="secondary"] { border: 1px solid var(--line-strong) !important; border-radius: 8px !important; color: var(--ink) !important; font-weight: 600 !important; }
+button[kind^="primary"]:active { transform: scale(0.97); }
+button[kind^="secondary"] { border: 1px solid var(--line-strong) !important; border-radius: 8px !important; color: var(--ink) !important; font-weight: 600 !important; transition: border-color .15s ease, color .15s ease, transform .08s ease !important; }
 button[kind^="secondary"]:hover { border-color: var(--teal) !important; color: var(--teal) !important; }
+button[kind^="secondary"]:active { transform: scale(0.97); }
+
+/* Entrance animation — cards and metrics fade/lift in on each rerun instead
+   of just snapping into place, so completing an action (submitting a form,
+   finishing a mock, revealing a flashcard) feels like a small reward rather
+   than the page silently swapping content out. Kept short (220ms) and only
+   on first paint so it never feels like it's in the way. */
+@keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+[data-testid="metric-container"], .flashcard, [data-testid="stAlertContainer"] {
+    animation: fadeSlideIn .22s ease-out;
+}
 
 /* Tabs */
 [data-baseweb="tab-list"] { border-bottom: 1px solid var(--line) !important; gap: 1.6rem !important; }
@@ -291,27 +308,30 @@ button[kind^="secondary"]:hover { border-color: var(--teal) !important; color: v
 }
 .st-key-topnav button[kind="primary"]:hover { background: var(--teal) !important; }
 
-/* Top nav on narrow/mobile viewports: Streamlit gives every column inside a
-   horizontal block a native min-width of ~100% (its own mechanism for
-   stacking columns via wrap on small screens). Combined with the nowrap rule
-   above, all 11 buttons could never fit — they got forced past their min-width
-   and pushed off-screen to the right instead of wrapping, so only the first
-   ("Home") was ever visible. Wrapping into a compact grid here fixes that. */
+/* Top nav on narrow/mobile viewports: wrapping every button into a grid (the
+   old approach) turned the nav into a tall block that pushed all real page
+   content below the fold — on a phone, roughly a third of the screen was
+   navigation before a student saw anything else. Scrolling the bar
+   horizontally instead keeps it to one compact row, the same pattern phones
+   already train people to expect from tab bars. Streamlit gives every column
+   inside a horizontal block a native min-width of ~100% by default (its own
+   mechanism for stacking columns on small screens), so that has to be
+   overridden to fit-content or every column would still blow up to full width
+   even with nowrap set. */
 @media (max-width: 768px) {
-    .st-key-topnav { padding: 8px; }
+    .st-key-topnav {
+        padding: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+    }
     .st-key-topnav [data-testid="stHorizontalBlock"] {
-        flex-wrap: wrap !important; row-gap: 4px !important;
+        flex-wrap: nowrap !important; width: max-content !important; min-width: 100% !important;
     }
     .st-key-topnav [data-testid="stColumn"] {
-        min-width: calc(25% - 3px) !important; flex: 1 1 calc(25% - 3px) !important;
+        min-width: fit-content !important; width: auto !important; flex: 0 0 auto !important;
     }
     .st-key-topnav button {
-        font-size: 12px !important; padding: 10px 4px !important; min-height: 42px;
-    }
-}
-@media (max-width: 420px) {
-    .st-key-topnav [data-testid="stColumn"] {
-        min-width: calc(33.333% - 3px) !important; flex: 1 1 calc(33.333% - 3px) !important;
+        font-size: 13px !important; padding: 10px 16px !important; min-height: 42px;
+        white-space: nowrap !important;
     }
 }
 .st-key-topnav button p { font-family: var(--sans) !important; font-weight: inherit !important; }
@@ -670,6 +690,12 @@ def page_dashboard():
     c3.metric("Cards mastered", f"{stats['cards_mastered']}/{stats['cards']}")
     task_pct = (stats["tasks_done"] / stats["tasks_total"] * 100) if stats["tasks_total"] else 0
     c4.metric("Study plan", f"{task_pct:.0f}%", help=f"{stats['tasks_done']} of {stats['tasks_total']} tasks done")
+
+    if stats["attempts"]:
+        pct = db.get_questions_answered_percentile(uid)
+        if pct is not None:
+            st.caption(f"📈 You've answered more questions than **{pct}%** of students on this "
+                       f"deployment. See the full 🏆 Leaderboard for more comparisons.")
 
     st.markdown("### Estimated scores")
     rows = cached_accuracy_by_subject(uid)
@@ -1126,6 +1152,15 @@ def page_flashcards():
     ss = st.session_state
     uid = ss["user_id"]
 
+    stats = cached_overall_stats(uid)
+    if stats["cards"]:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Mastered", f"{stats['cards_mastered']}/{stats['cards']}")
+        c2.metric("Due today", stats["cards_due"])
+        pct = (stats["cards_mastered"] / stats["cards"] * 100) if stats["cards"] else 0
+        c3.metric("Mastery", f"{pct:.0f}%")
+        st.divider()
+
     c1, c2 = st.columns([3, 1])
     with c1:
         sid = subject_selectbox("Subtest", key="fc_subject", include_all=True)
@@ -1256,10 +1291,19 @@ def page_scheduler():
                 st.info("Everything from this plan is already on your list — nothing new to add.")
             st.rerun()
 
+    all_tasks = cached_study_tasks(uid)
+    if all_tasks:
+        done_n = sum(1 for t in all_tasks if t["status"] == "Done")
+        st.progress(done_n / len(all_tasks), text=f"{done_n} of {len(all_tasks)} tasks done")
+
     filt = st.radio("Show", ["All", "Todo", "In Progress", "Done"], horizontal=True)
     tasks = cached_study_tasks(uid, status=filt)
     if not tasks:
-        st.info("No tasks. Add one above or generate a plan.")
+        if all_tasks:
+            st.info(f"Nothing in **{filt}** right now — try a different filter above.")
+        else:
+            st.info("📭 No tasks yet — add one above, or click **✨ Generate a study plan** "
+                     "for a ready-made schedule across every subtest.")
         return
 
     today = date.today()
@@ -1372,10 +1416,10 @@ def _g_subtest_tab(code, color, intro, what_tests, strategy_title, strategy, tra
 
 
 def page_guide():
-    vr_c = SUB_BY_NAME.get("Verbal Reasoning", {}).get("color", "#3B6488")
-    dm_c = SUB_BY_NAME.get("Decision Making", {}).get("color", "#6E5299")
-    qr_c = SUB_BY_NAME.get("Quantitative Reasoning", {}).get("color", "#12795C")
-    sjt_c = SUB_BY_NAME.get("Situational Judgement", {}).get("color", "#B06A2C")
+    vr_c = SUB_BY_NAME.get("Verbal Reasoning", {}).get("color", "#3D5A80")
+    dm_c = SUB_BY_NAME.get("Decision Making", {}).get("color", "#5B4B7A")
+    qr_c = SUB_BY_NAME.get("Quantitative Reasoning", {}).get("color", "#3A6B58")
+    sjt_c = SUB_BY_NAME.get("Situational Judgement", {}).get("color", "#8A6A3D")
 
     st.markdown("<div style='font-family:var(--mono);font-size:.75rem;letter-spacing:.14em;"
                 "text-transform:uppercase;color:var(--teal)'>University Clinical Aptitude Test · 2025 / 2026 cycle</div>",
@@ -2655,6 +2699,14 @@ def page_mock():
                     "timed at the real per-question rate, so the clock pressure mirrors the exam.")
         st.caption("Official pacing — VR 44Q/21m · DM 35Q/37m · QR 36Q/26m · SJT 69Q/26m. "
                    "Add more questions in ⚙️ Manage to lengthen your mocks.")
+
+        mock_summary = db.get_mock_summary(ss["user_id"])
+        if mock_summary["count"]:
+            c1, c2 = st.columns(2)
+            c1.metric("Mocks completed", mock_summary["count"])
+            c2.metric("Best score", f"{mock_summary['best_pct']:.0f}%")
+        st.divider()
+
         mode = st.radio("Mode", ["Full mock (all subtests)", "Single subtest"], horizontal=True)
         subtest_ids = None
         if mode == "Single subtest":
