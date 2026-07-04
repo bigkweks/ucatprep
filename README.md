@@ -1,4 +1,4 @@
-# UCAT Prep
+# UCATify
 
 A Streamlit study app for the **UCAT** (University Clinical Aptitude Test),
 covering the four current subtests:
