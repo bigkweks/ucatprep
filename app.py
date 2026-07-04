@@ -367,6 +367,24 @@ hr { border-color: var(--line) !important; }
     font-family: var(--serif); box-shadow: 0 4px 14px rgba(0,0,0,0.05); min-height: 150px;
     display: flex; align-items: center; justify-content: center;
 }
+
+/* Dashboard hero card — one high-contrast card for the single most important
+   number, with quick actions living inside/right below it, rather than that
+   number competing for attention as one of several equal-weight tiles. */
+.hero-card {
+    background: linear-gradient(135deg, var(--ink) 0%, var(--teal) 100%);
+    border-radius: 16px; padding: 28px 32px; margin-bottom: 14px;
+    box-shadow: 0 8px 24px rgba(20,33,63,0.25);
+}
+.hero-label {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+    color: rgba(255,255,255,0.65);
+}
+.hero-number {
+    font-family: var(--serif); font-weight: 700; font-size: 3.2rem; line-height: 1.1;
+    color: #FFFFFF; margin-top: 4px;
+}
+.hero-sub { color: rgba(255,255,255,0.75); font-size: 14px; margin-top: 2px; }
 .pill { display:inline-block; padding:2px 10px; border-radius:12px; font-size:12px; font-weight:600; color:white; font-family: var(--sans); }
 .auth-hero { max-width:380px; margin:60px auto 0; text-align:center; }
 .auth-hero .mark { margin-bottom:8px; display:flex; justify-content:center; }
@@ -653,6 +671,46 @@ def page_dashboard():
 
     dte, exam_d = days_to_exam()
 
+    # Hero card — the single most important number (days until the exam)
+    # gets its own high-contrast, full-width treatment with quick actions
+    # built in, rather than competing for attention as one of several
+    # equal-weight stat tiles below.
+    if dte is not None:
+        if dte >= 0:
+            st.markdown(
+                f"<div class='hero-card'>"
+                f"<div class='hero-label'>Days until your UCAT</div>"
+                f"<div class='hero-number'>{dte}</div>"
+                f"<div class='hero-sub'>on {exam_d.strftime('%B %d, %Y')}</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                "<div class='hero-card'><div class='hero-label'>Exam day has passed</div>"
+                "<div class='hero-sub' style='margin-top:6px'>🎉 Good luck / well done!</div></div>",
+                unsafe_allow_html=True,
+            )
+        hcols = st.columns(3)
+        if hcols[0].button("⏱️ Take a mock", width="stretch", key="hero_mock"):
+            ss["nav_page"] = "⏱️ Mock Exam"
+            st.rerun()
+        if hcols[1].button("🧭 Read the Guide", width="stretch", key="hero_guide"):
+            ss["nav_page"] = "🧭 UCAT Guide"
+            st.rerun()
+        if hcols[2].button("🗓️ Study Scheduler", width="stretch", key="hero_plan"):
+            ss["nav_page"] = "🗓️ Study Scheduler"
+            st.rerun()
+    else:
+        st.markdown(
+            "<div class='hero-card'><div class='hero-label'>Set your exam date to start your countdown</div>"
+            "<div class='hero-sub' style='margin-top:6px'>Powers this countdown and your study plan.</div></div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("⚙️ Set exam date", key="hero_set_date"):
+            ss["nav_page"] = "⚙️ Manage"
+            st.rerun()
+
     # First-time onboarding nudge — only for a genuinely fresh account (no
     # attempts yet and no exam date set). Dismissal is stored per-account so
     # it doesn't reappear once acted on or explicitly dismissed.
@@ -660,29 +718,13 @@ def page_dashboard():
         with st.container(border=True):
             st.markdown("#### 👋 New here? Three quick things first")
             st.markdown(
-                "- **Set your exam date** in ⚙️ Manage — powers the countdown and the study plan.\n"
+                "- **Set your exam date** above — powers the countdown and the study plan.\n"
                 "- **Sit a short diagnostic mock** to see your starting point across all four subtests.\n"
                 "- **Skim the 🧭 UCAT Guide** — a full playbook, worth 15 minutes before diving into practice."
             )
-            bcols = st.columns(4)
-            if bcols[0].button("⚙️ Set exam date", width="stretch"):
-                ss["nav_page"] = "⚙️ Manage"
-                st.rerun()
-            if bcols[1].button("⏱️ Take a mock", width="stretch"):
-                ss["nav_page"] = "⏱️ Mock Exam"
-                st.rerun()
-            if bcols[2].button("🧭 Read the Guide", width="stretch"):
-                ss["nav_page"] = "🧭 UCAT Guide"
-                st.rerun()
-            if bcols[3].button("Dismiss", width="stretch"):
+            if st.button("Dismiss", key="dismiss_onboarding"):
                 db.set_context(uid, "onboarding_dismissed", "1")
                 st.rerun()
-
-    if dte is not None:
-        if dte >= 0:
-            st.info(f"🗓️ **{dte} days** until your UCAT on **{exam_d.strftime('%B %d, %Y')}**.")
-        else:
-            st.success("🎉 Your scheduled exam date has passed — good luck / well done!")
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Questions answered", stats["attempts"])
