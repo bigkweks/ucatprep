@@ -17,7 +17,22 @@ import random
 import hmac
 import html
 import time
+import base64
+from pathlib import Path
 from datetime import date, datetime, timedelta
+
+_LOGO_PATH = Path(__file__).parent / "assets" / "logo.png"
+_LOGO_B64 = base64.b64encode(_LOGO_PATH.read_bytes()).decode() if _LOGO_PATH.exists() else ""
+
+
+def _logo_img(height_px: int, extra_style: str = "") -> str:
+    """An <img> tag for the app logo, sized to fit inline HTML (sidebar
+    header, sign-in hero) — st.markdown can't reference a local file path
+    directly, so it's embedded as a base64 data URI instead."""
+    if not _LOGO_B64:
+        return ""
+    return (f"<img src='data:image/png;base64,{_LOGO_B64}' "
+            f"style='height:{height_px}px;width:{height_px}px;{extra_style}' />")
 
 # Pull secrets into the environment before the data layer reads DATABASE_URL.
 try:
@@ -170,7 +185,7 @@ def _invalidate_flashcard_progress_cache():
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="UCAT Prep",
-    page_icon="🩺",
+    page_icon=str(_LOGO_PATH) if _LOGO_PATH.exists() else "🩺",
     layout="wide",
     # "auto" (not "expanded"): Streamlit opens the sidebar by default on wide
     # screens but starts it closed on narrow/mobile ones. Forcing "expanded"
@@ -188,12 +203,12 @@ db.init_db()
 st.markdown("""
 <style>
 :root{
-    --paper:#EFF1EC; --paper-2:#FAFBF8; --card:#FFFFFF;
-    --ink:#16211F; --ink-soft:#4C5651; --ink-faint:#78827C;
-    --line:#DBDFD6; --line-strong:#C7CCC1;
-    --teal:#0C6B58; --teal-bright:#0F8A70; --teal-wash:#E4EFEA;
+    --paper:#F8F6EE; --paper-2:#FCFAF3; --card:#FFFFFF;
+    --ink:#14213F; --ink-soft:#3F4C63; --ink-faint:#78859C;
+    --line:#E1DCCB; --line-strong:#CEC6AE;
+    --teal:#1D3E72; --teal-bright:#2C5590; --teal-wash:#E7ECF4;
     --coral:#C24A38; --coral-wash:#F6E6E1;
-    --gold:#B5762A; --gold-wash:#F3E7D6;
+    --gold:#BA8F4E; --gold-wash:#F3E7D2;
     --serif:"Charter","Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
     --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
     --mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
@@ -334,7 +349,7 @@ hr { border-color: var(--line) !important; }
 }
 .pill { display:inline-block; padding:2px 10px; border-radius:12px; font-size:12px; font-weight:600; color:white; font-family: var(--sans); }
 .auth-hero { max-width:380px; margin:60px auto 0; text-align:center; }
-.auth-hero .mark { font-size:2.6rem; margin-bottom:8px; }
+.auth-hero .mark { margin-bottom:8px; display:flex; justify-content:center; }
 .auth-hero h2 { font-family: var(--serif); margin-bottom:4px; color: var(--ink); }
 .auth-hero .eyebrow { font-family: var(--mono); font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color: var(--teal); margin-bottom:6px; }
 .auth-hero p { color: var(--ink-soft); margin-bottom:28px; font-size:14px; }
@@ -350,7 +365,7 @@ def _check_site_password() -> bool:
         return True
     st.markdown(
         "<div class='auth-hero'>"
-        "<div class='mark'>🩺</div>"
+        f"<div class='mark'>{_logo_img(64)}</div>"
         "<div class='eyebrow'>UCAT Prep</div>"
         "<h2>Welcome back</h2>"
         "<p>Enter the site password to continue</p>"
@@ -385,7 +400,7 @@ def _check_account() -> bool:
         return True
     st.markdown(
         "<div class='auth-hero'>"
-        "<div class='mark'>🩺</div>"
+        f"<div class='mark'>{_logo_img(64)}</div>"
         "<div class='eyebrow'>UCAT Prep</div>"
         "<h2>Score in the top decile.</h2>"
         "<p>Sign in to your account to start studying</p>"
@@ -554,7 +569,13 @@ def days_to_exam():
 
 # ── Sidebar (account + at-a-glance stats) ──────────────────────────────────────
 with st.sidebar:
-    st.markdown("## 🩺 UCAT Prep")
+    st.markdown(
+        f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:4px'>"
+        f"{_logo_img(34)}"
+        f"<span style='font-family:var(--serif);font-weight:600;font-size:1.5rem;color:#FFFFFF'>UCAT Prep</span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
     st.caption(f"👤 Signed in as **{st.session_state.get('username', '')}**")
     if st.button("Log out", width="stretch"):
         for k in list(st.session_state.keys()):
@@ -701,7 +722,7 @@ def page_dashboard():
         if not ts.empty:
             ts["accuracy"] = ts["correct"] / ts["attempts"] * 100
             fig2 = px.line(ts, x="day", y="attempts", markers=True)
-            fig2.update_traces(line_color="#0C6B58")
+            fig2.update_traces(line_color="#1D3E72")
             fig2.update_layout(height=280, margin=dict(t=10, b=10), plot_bgcolor="white",
                                yaxis_title="Questions", xaxis_title="")
             st.plotly_chart(fig2, width="stretch")
@@ -731,9 +752,9 @@ def page_dashboard():
 
         fig4 = go.Figure()
         fig4.add_trace(go.Scatter(x=daily["day"], y=daily["avg_seconds"], mode="lines+markers",
-                                   name="Your average", line=dict(color="#0C6B58", width=3)))
+                                   name="Your average", line=dict(color="#1D3E72", width=3)))
         fig4.add_trace(go.Scatter(x=daily["day"], y=daily["target_seconds"], mode="lines",
-                                   name="Target (official pacing)", line=dict(color="#B5762A", width=2, dash="dash")))
+                                   name="Target (official pacing)", line=dict(color="#BA8F4E", width=2, dash="dash")))
         fig4.update_layout(height=300, margin=dict(t=10, b=10), plot_bgcolor="white",
                            yaxis_title="Seconds per question", xaxis_title="",
                            legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
@@ -1324,10 +1345,10 @@ def _g_block(title, color, bullets):
 
 def _g_example(color, q, a, trap=None):
     st.markdown(
-        f"<div style='background:var(--paper-2,#FAFBF8);border:1px solid var(--line,#DBDFD6);"
+        f"<div style='background:var(--paper-2,#FCFAF3);border:1px solid var(--line,#E1DCCB);"
         f"border-left:4px solid {color};border-radius:0 10px 10px 0;padding:.9rem 1.05rem;margin:.4rem 0'>"
         f"<div style='font-weight:600;margin-bottom:.4rem'>{q}</div>"
-        f"<div style='color:var(--ink-soft,#4C5651)'>{a}</div></div>",
+        f"<div style='color:var(--ink-soft,#3F4C63)'>{a}</div></div>",
         unsafe_allow_html=True,
     )
     if trap:
@@ -1399,9 +1420,9 @@ def page_guide():
             for num, title, anchor in chunk:
                 st.markdown(
                     f"<a href='#{anchor}' style='text-decoration:none;display:block;padding:.25rem 0'>"
-                    f"<span style='font-family:var(--mono);color:var(--teal,#0C6B58);font-weight:700;"
+                    f"<span style='font-family:var(--mono);color:var(--teal,#1D3E72);font-weight:700;"
                     f"margin-right:.6rem'>{num}</span>"
-                    f"<span style='color:var(--ink,#16211F)'>{title}</span></a>",
+                    f"<span style='color:var(--ink,#14213F)'>{title}</span></a>",
                     unsafe_allow_html=True,
                 )
 
@@ -1485,7 +1506,7 @@ def page_guide():
     for i, (title, tagline, body) in enumerate(application_steps, start=1):
         c1, c2 = st.columns([1, 11])
         c1.markdown(
-            f"<div style='width:2.2rem;height:2.2rem;border-radius:50%;background:var(--teal,#0C6B58);"
+            f"<div style='width:2.2rem;height:2.2rem;border-radius:50%;background:var(--teal,#1D3E72);"
             f"color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700'>{i}</div>",
             unsafe_allow_html=True,
         )
@@ -1757,7 +1778,7 @@ def page_guide():
     for i, (wk, title, body) in enumerate(phases, start=1):
         c1, c2 = st.columns([1, 11])
         c1.markdown(
-            f"<div style='width:2.2rem;height:2.2rem;border-radius:50%;background:var(--teal,#0C6B58);"
+            f"<div style='width:2.2rem;height:2.2rem;border-radius:50%;background:var(--teal,#1D3E72);"
             f"color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700'>{i}</div>",
             unsafe_allow_html=True,
         )
@@ -1795,7 +1816,7 @@ def page_guide():
          "a day compounds fast.", False),
     ]
     for badge, title, body, free in resources:
-        badge_color = "var(--teal,#0C6B58)" if free else "var(--ink-faint,#78827C)"
+        badge_color = "var(--teal,#1D3E72)" if free else "var(--ink-faint,#78859C)"
         with st.container(border=True):
             c1, c2 = st.columns([1, 6])
             c1.markdown(
@@ -1823,22 +1844,22 @@ def page_guide():
     )
     c1, c2 = st.columns(2)
     with c1:
-        _g_block("Before you go", "#0C6B58", [
+        _g_block("Before you go", "#1D3E72", [
             "Sleep properly the night before — cramming past midnight costs more than it adds.",
             "Bring the **correct photo ID**; check the test-centre rules the day before.",
             "Eat something steady and hydrate; arrive early to settle your nerves.",
         ])
-        _g_block("Keeping nerves in check", "#0C6B58", [
+        _g_block("Keeping nerves in check", "#1D3E72", [
             "Slow breathing between subtests resets a racing mind faster than re-reading a question.",
             "You've rehearsed this exact format — the day is just another mock with higher stakes.",
         ])
     with c2:
-        _g_block("During the test", "#0C6B58", [
+        _g_block("During the test", "#1D3E72", [
             "Work one subtest at a time. A rough section is not the exam — reset and move on.",
             "Trust your pace and your “flag & move” reflex; don't renegotiate strategy mid-exam.",
             "Always spend the final seconds of each subtest filling every blank.",
         ])
-        _g_block("Perspective", "#0C6B58", [
+        _g_block("Perspective", "#1D3E72", [
             "The UCAT is one part of your application, alongside grades, personal statement and interview.",
             "Different schools weight it differently — a strong score opens doors, but it isn't the whole decision.",
         ])
@@ -1855,7 +1876,7 @@ def page_guide():
     )
 
     st.markdown("#### When you get your results")
-    _g_block("Timeline", "#0C6B58", [
+    _g_block("Timeline", "#1D3E72", [
         "**The moment you finish**, your raw scores for the three cognitive subtests (VR, DM, QR) are shown "
         "on-screen and scaled to 300–900 each — SJT is not scored live.",
         "You'll also receive your own **statement of results** shortly after.",
@@ -1888,7 +1909,7 @@ def page_guide():
             c1, c2 = st.columns([1, 6])
             c1.markdown(
                 f"<span style='font-family:var(--mono);font-size:.62rem;letter-spacing:.08em;font-weight:700;"
-                f"color:#fff;background:var(--teal,#0C6B58);padding:.2rem .45rem;border-radius:5px;"
+                f"color:#fff;background:var(--teal,#1D3E72);padding:.2rem .45rem;border-radius:5px;"
                 f"white-space:nowrap'>{badge}</span>", unsafe_allow_html=True,
             )
             with c2:
@@ -1919,7 +1940,7 @@ def page_guide():
                    "against this year's actual requirements.")
 
     st.markdown("#### If it didn't go the way you hoped")
-    _g_block("Your options", "#0C6B58", [
+    _g_block("Your options", "#1D3E72", [
         "**Apply broadly, not just to reach schools** — mix threshold, ranking and weighted-approach schools so "
         "your list isn't all long shots.",
         "**Look at Gateway/Foundation year courses** — several schools run widening-access programmes with an "
@@ -2065,22 +2086,51 @@ def _tutor_increment_today(uid):
     return count
 
 
+def _tutor_api_key(uid):
+    """Which Anthropic API key (if any) this user's Tutor requests should use,
+    and where it came from.
+
+    Prefers the user's own key (added in Manage → Account) so their usage is
+    billed to them, not to whoever is paying for the shared ANTHROPIC_API_KEY.
+    The shared key is only used as a fallback for the deployment owner/admin
+    (per ADMIN_USERNAMES, same test as the content-editing gate) — everyone
+    else must bring their own key rather than silently drawing on it."""
+    personal = db.get_user_api_key(uid)
+    if personal:
+        return personal, "personal"
+    shared = os.environ.get("ANTHROPIC_API_KEY", "")
+    if shared and _is_content_admin():
+        return shared, "shared"
+    return None, None
+
+
 def page_tutor():
     st.title("🤖 AI Tutor")
     uid = st.session_state["user_id"]
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not _HAS_ANTHROPIC or not api_key:
+    api_key, key_source = _tutor_api_key(uid)
+    if not _HAS_ANTHROPIC:
+        st.warning("The AI Tutor needs the `anthropic` package installed. Everything else in the app "
+                   "works without it.")
+        return
+    if not api_key:
         st.warning(
-            "The AI Tutor needs the `anthropic` package and an `ANTHROPIC_API_KEY`. "
-            "Add the key to your Streamlit secrets or environment to enable chat. "
-            "Everything else in the app works without it."
+            "The AI Tutor needs an Anthropic API key. Add your own personal key in "
+            "⚙️ Manage → Account to start chatting — your usage will be billed to you, not shared "
+            "with anyone else on this deployment."
         )
         return
 
-    used_today = _tutor_messages_today(uid)
+    # The daily quota protects the deployment owner's own spend, so it only
+    # applies when running on their shared key — a personal key is the user's
+    # own money and their own limit to manage.
+    used_today = _tutor_messages_today(uid) if key_source == "shared" else 0
     cols = st.columns([4, 1])
-    cols[0].caption(f"Ask anything — concepts, practice problems, study strategy. "
-                     f"({used_today}/{TUTOR_DAILY_LIMIT} messages used today)")
+    caption = "Ask anything — concepts, practice problems, study strategy."
+    if key_source == "shared":
+        caption += f" ({used_today}/{TUTOR_DAILY_LIMIT} messages used today)"
+    else:
+        caption += " (using your personal API key)"
+    cols[0].caption(caption)
     if cols[1].button("🗑️ Clear chat"):
         db.clear_chat_history(uid)
         st.rerun()
@@ -2095,9 +2145,10 @@ def page_tutor():
     # rather than making the student retype what they were just reading.
     prefill = st.session_state.pop("tutor_prefill", None)
 
-    if used_today >= TUTOR_DAILY_LIMIT:
+    if key_source == "shared" and used_today >= TUTOR_DAILY_LIMIT:
         st.info(f"You've used all {TUTOR_DAILY_LIMIT} of today's Tutor messages — this keeps API "
-                "costs bounded for whoever is paying for this deployment. It resets tomorrow.")
+                "costs bounded for whoever is paying for this deployment. It resets tomorrow, or add "
+                "your own API key in Manage → Account for unlimited use.")
         return
 
     # max_chars bounds the cost of a single message the same way the daily
@@ -2110,7 +2161,8 @@ def page_tutor():
 
     if prompt:
         db.save_message(uid, "user", prompt)
-        _tutor_increment_today(uid)
+        if key_source == "shared":
+            _tutor_increment_today(uid)
         with st.chat_message("user"):
             st.markdown(prompt)
         with st.chat_message("assistant"):
@@ -2171,6 +2223,29 @@ def page_manage():
                 else:
                     db.set_password(uid, new_pw)
                     st.success("Password updated.")
+
+        st.divider()
+        st.markdown("**AI Tutor — personal API key**")
+        if db.has_user_api_key(uid):
+            st.caption("✅ A personal Anthropic API key is set. Your Tutor conversations are billed to "
+                       "your own key, not shared with anyone else on this deployment.")
+            if st.button("Remove personal API key"):
+                db.clear_user_api_key(uid)
+                st.success("Removed. The Tutor will fall back to the deployment default, if one is configured for you.")
+                st.rerun()
+        else:
+            st.caption("By default the AI Tutor may run on a key the deployment owner pays for. Add your "
+                       "own Anthropic API key (from console.anthropic.com → API Keys) so your Tutor usage "
+                       "is billed to you instead.")
+            with st.form("set_api_key", clear_on_submit=True):
+                key_input = st.text_input("Anthropic API key", type="password", placeholder="sk-ant-...")
+                if st.form_submit_button("Save key", type="primary"):
+                    if not key_input or not key_input.strip().startswith("sk-ant-"):
+                        st.error("That doesn't look like a valid Anthropic API key (should start with 'sk-ant-').")
+                    else:
+                        db.set_user_api_key(uid, key_input.strip())
+                        st.success("Personal API key saved — the Tutor will use it from now on.")
+                        st.rerun()
 
     # Exam date
     with tabs[1]:
@@ -2654,7 +2729,7 @@ def page_mock():
     with top[0]:
         components.html(f"""
             <div id='ucat-timer' style="font:600 26px/1.2 -apple-system,Segoe UI,Roboto,sans-serif;
-                 color:{'#C24A38' if remaining < 60 else '#16211F'}"></div>
+                 color:{'#C24A38' if remaining < 60 else '#14213F'}"></div>
             <script>
               let r = {int(remaining)};
               const el = document.getElementById('ucat-timer');
