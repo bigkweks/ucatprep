@@ -1,5 +1,5 @@
 """
-UCAT Prep — a Streamlit study app.
+UCATify — a Streamlit study app.
 
 Pages: Dashboard (analytics), Practice Questions, Flashcards (spaced repetition),
 Study Scheduler, Strategy & Skills, and an AI Tutor powered by Claude.
@@ -184,7 +184,7 @@ def _invalidate_flashcard_progress_cache():
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="UCAT Prep",
+    page_title="UCATify",
     page_icon=str(_LOGO_PATH) if _LOGO_PATH.exists() else "🩺",
     layout="wide",
     # "auto" (not "expanded"): Streamlit opens the sidebar by default on wide
@@ -366,7 +366,7 @@ def _check_site_password() -> bool:
     st.markdown(
         "<div class='auth-hero'>"
         f"<div class='mark'>{_logo_img(64)}</div>"
-        "<div class='eyebrow'>UCAT Prep</div>"
+        "<div class='eyebrow'>UCATify</div>"
         "<h2>Welcome back</h2>"
         "<p>Enter the site password to continue</p>"
         "</div>",
@@ -401,7 +401,7 @@ def _check_account() -> bool:
     st.markdown(
         "<div class='auth-hero'>"
         f"<div class='mark'>{_logo_img(64)}</div>"
-        "<div class='eyebrow'>UCAT Prep</div>"
+        "<div class='eyebrow'>UCATify</div>"
         "<h2>Score in the top decile.</h2>"
         "<p>Sign in to your account to start studying</p>"
         "</div>",
@@ -572,7 +572,7 @@ with st.sidebar:
     st.markdown(
         f"<div style='display:flex;align-items:center;gap:10px;margin-bottom:4px'>"
         f"{_logo_img(34)}"
-        f"<span style='font-family:var(--serif);font-weight:600;font-size:1.5rem;color:#FFFFFF'>UCAT Prep</span>"
+        f"<span style='font-family:var(--serif);font-weight:600;font-size:1.5rem;color:#FFFFFF'>UCATify</span>"
         f"</div>",
         unsafe_allow_html=True,
     )
@@ -1805,7 +1805,7 @@ def page_guide():
         ("FREE · OFFICIAL", "UCAT Consortium practice materials (ucat.ac.uk)",
          "The most representative questions and the two official mock exams. The single best calibration tool "
          "— do the full mocks near the end of your prep.", True),
-        ("FREE · THIS APP", "Your UCAT Prep question bank",
+        ("FREE · THIS APP", "Your UCATify question bank",
          "A difficulty-calibrated, duplicate-free bank with per-user progress tracking and flashcards — use it "
          "for daily drilling and to see accuracy by subtest.", True),
         ("PAID · VOLUME", "Commercial question banks & mock platforms",

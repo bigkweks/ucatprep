@@ -1,5 +1,5 @@
 """
-Data layer for the UCAT Prep app.
+Data layer for the UCATify app.
 
 Dual backend, mirroring the rest of this repo: when DATABASE_URL is set (Neon /
 any cloud PostgreSQL) and psycopg2 is available it talks to Postgres; otherwise
