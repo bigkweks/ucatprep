@@ -918,6 +918,27 @@ def get_question_counts_by_subject():
         _close(conn)
 
 
+def get_landing_stats():
+    """Public content-size counts for the signed-out landing page — no
+    user_id required, unlike get_overall_stats(), since nobody's signed in
+    yet at that point."""
+    conn = get_conn()
+    try:
+        row = _q1(conn, """
+            SELECT
+                (SELECT COUNT(*) FROM questions WHERE active = 1 OR active IS NULL) AS questions,
+                (SELECT COUNT(*) FROM flashcards) AS flashcards,
+                (SELECT COUNT(*) FROM subjects) AS subjects
+        """) or {}
+        return {
+            "questions": row.get("questions") or 0,
+            "flashcards": row.get("flashcards") or 0,
+            "subjects": row.get("subjects") or 0,
+        }
+    finally:
+        _close(conn)
+
+
 def upsert_question(data: dict):
     now = datetime.now().isoformat()
     data = dict(data)

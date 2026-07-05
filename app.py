@@ -464,6 +464,24 @@ hr { border-color: var(--line) !important; }
 .auth-hero .eyebrow { font-family: var(--mono); font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color: var(--teal); margin-bottom:6px; }
 .auth-hero p { color: var(--ink-soft); margin-bottom:28px; font-size:14px; }
 
+/* Signed-out landing page — wider than the auth-hero card that follows it
+   (that one stays narrow and task-focused for the actual sign-in/sign-up
+   form), since it needs room for a stat row and feature list. */
+.landing-hero { max-width:640px; margin:48px auto 0; text-align:center; }
+.landing-hero .mark { margin-bottom:8px; display:flex; justify-content:center; }
+.landing-hero .eyebrow { font-family: var(--mono); font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color: var(--teal); margin-bottom:6px; }
+.landing-hero h1 { font-family: var(--serif); margin-bottom:14px; color: var(--ink); }
+.landing-hero .pitch { color: var(--ink-soft); font-size:15px; max-width:480px; margin:0 auto 32px; line-height:1.6; }
+.landing-features { max-width:480px; margin:0 auto 8px; text-align:left; }
+.landing-features li { color: var(--ink-soft); font-size:14px; margin-bottom:10px; padding-left:4px; }
+.landing-features li strong { color: var(--ink); }
+.st-key-landing_get_started { margin-top: 8px; }
+.st-key-landing_sign_in button {
+    background: transparent !important; border: none !important; color: var(--ink-faint) !important;
+    font-weight: 500 !important; box-shadow: none !important; margin-top: 2px;
+}
+.st-key-landing_sign_in button:hover { color: var(--teal) !important; }
+
 /* Day streak milestone celebration — a quiet flame accent that only appears
    the day a streak milestone (3, 7, 14, 30...) is first reached, not a
    permanent badge competing with the number the rest of the time. Tiers
@@ -765,22 +783,75 @@ def _check_site_password() -> bool:
     return False
 
 
+def _landing_page():
+    """What a signed-out visitor sees before the sign-in form — a value-first
+    pitch with real, live content-size numbers as the hook (not fabricated
+    social-proof counts, which would embarrass a small deployment), so the
+    first thing anyone sees is evidence there's substance here rather than
+    an empty account-creation form. One primary action (start free) plus a
+    lightweight secondary path for anyone who already has an account."""
+    stats = db.get_landing_stats()
+    st.markdown(
+        "<div class='landing-hero'>"
+        f"<div class='mark'>{_logo_img(64)}</div>"
+        "<div class='eyebrow'>UCATify</div>"
+        "<h1>Score in the top decile.</h1>"
+        "<p class='pitch'>A UCAT prep tool built around your own performance data — practice "
+        "questions, timed mocks paced to the real exam, spaced-repetition flashcards, and an AI "
+        "tutor that already knows where you're weak.</p>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    col = st.columns([1, 3, 1])[1]
+    with col:
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Questions", f"{stats['questions']:,}")
+        m2.metric("Flashcards", f"{stats['flashcards']:,}")
+        m3.metric("Subtests", stats["subjects"])
+        m4.metric("Mock length", "111 min", help="Paced to the real UCAT format")
+
+        st.markdown(
+            "<ul class='landing-features'>"
+            "<li><strong>Practice bank</strong> across all four UCAT subtests, filterable by difficulty.</li>"
+            "<li><strong>Timed mocks</strong> at official per-question pacing, not a generic countdown.</li>"
+            "<li><strong>Flashcards</strong> that come back sooner the more you get them wrong.</li>"
+            "<li><strong>An AI tutor</strong> grounded in your real accuracy and pace, not generic advice.</li>"
+            "</ul>",
+            unsafe_allow_html=True,
+        )
+
+        if st.button("Get started — it's free", type="primary", width="stretch", key="landing_get_started"):
+            st.session_state["_auth_view"] = "signup"
+            st.rerun()
+
+        if st.button("Already have an account? Sign in", key="landing_sign_in", width="stretch"):
+            st.session_state["_auth_view"] = "signin"
+            st.rerun()
+
+
 def _check_account() -> bool:
     """Per-account sign-in/sign-up so each student's progress is tracked separately."""
     if st.session_state.get("user_id"):
         return True
+    if not st.session_state.get("_auth_view"):
+        _landing_page()
+        st.stop()
+        return False
+    subhead = ("Create your account to start studying" if st.session_state["_auth_view"] == "signup"
+               else "Sign in to your account to start studying")
     st.markdown(
         "<div class='auth-hero'>"
         f"<div class='mark'>{_logo_img(64)}</div>"
         "<div class='eyebrow'>UCATify</div>"
         "<h2>Score in the top decile.</h2>"
-        "<p>Sign in to your account to start studying</p>"
+        f"<p>{subhead}</p>"
         "</div>",
         unsafe_allow_html=True,
     )
     col = st.columns([1, 2, 1])[1]
     with col:
-        tab_login, tab_signup = st.tabs(["Sign in", "Create account"])
+        default_tab = "Create account" if st.session_state["_auth_view"] == "signup" else "Sign in"
+        tab_login, tab_signup = st.tabs(["Sign in", "Create account"], default=default_tab)
         with tab_login:
             with st.form("login_form"):
                 u = st.text_input("Username")
