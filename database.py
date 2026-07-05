@@ -1487,21 +1487,34 @@ def get_mock_summary(user_id):
         _close(conn)
 
 
-def get_attempts_over_time(user_id, days=30):
+def get_daily_activity_counts(user_id, days=371):
+    """Per-day counts of practice/mock attempts + flashcard reviews for the
+    last `days` days, for the Dashboard's GitHub/Anki-style activity
+    calendar. Returns {date: count}; days with no activity are simply
+    absent from the dict (the caller fills gaps with 0). Same activity
+    definition as get_streak(), so the calendar and the streak always agree
+    on what counts as "did something that day"."""
     ph = _ph()
-    start = (date.today() - timedelta(days=days)).isoformat()
     conn = get_conn()
     try:
-        return _q(conn, f"""
-            SELECT substr(created_at, 1, 10) AS day,
-                   COUNT(*) AS attempts,
-                   SUM(is_correct) AS correct
-            FROM attempts WHERE user_id = {ph} AND created_at >= {ph}
-            GROUP BY substr(created_at, 1, 10)
-            ORDER BY day
-        """, (user_id, start))
+        rows = _q(conn, f"SELECT created_at FROM attempts WHERE user_id = {ph} AND created_at IS NOT NULL",
+                  (user_id,))
+        rows += _q(conn, f"SELECT last_reviewed AS created_at FROM flashcard_progress "
+                          f"WHERE user_id = {ph} AND last_reviewed IS NOT NULL", (user_id,))
     finally:
         _close(conn)
+
+    cutoff = date.today() - timedelta(days=days)
+    counts: dict = {}
+    for r in rows:
+        ts = r["created_at"]
+        if not ts:
+            continue
+        d = date.fromisoformat(str(ts)[:10])
+        if d < cutoff:
+            continue
+        counts[d] = counts.get(d, 0) + 1
+    return counts
 
 
 def get_daily_pace(user_id, days=30):

@@ -47,7 +47,6 @@ import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
 import plotly.graph_objects as go
-import plotly.express as px
 
 try:
     import anthropic
@@ -101,8 +100,8 @@ def cached_accuracy_by_subject(uid):
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def cached_attempts_over_time(uid, days):
-    return db.get_attempts_over_time(uid, days)
+def cached_daily_activity(uid, days):
+    return db.get_daily_activity_counts(uid, days)
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -162,7 +161,7 @@ def _invalidate_stats_cache():
     """Call after any write that can change a user's stats/analytics."""
     cached_overall_stats.clear()
     cached_accuracy_by_subject.clear()
-    cached_attempts_over_time.clear()
+    cached_daily_activity.clear()
     cached_daily_pace.clear()
     cached_leaderboard_questions.clear()
     cached_leaderboard_pace.clear()
@@ -391,6 +390,28 @@ hr { border-color: var(--line) !important; }
     background: var(--card); border: 1px solid var(--line); border-radius: 10px;
     padding: 10px 14px 2px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
+/* Activity calendar — hand-built (not Plotly, which clamps chart width to
+   its container no matter what's requested) so it can genuinely overflow
+   into a horizontal scrollbar on a phone instead of squeezing 53 weeks of
+   cells into 390px and becoming illegible. Weekday labels stay outside the
+   scroll region so they're always visible next to whichever weeks are
+   currently in view. */
+.streak-cal-wrap { display: flex; gap: 6px; align-items: flex-start; background: var(--card);
+    border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.streak-cal-days { display: flex; flex-direction: column; gap: 3px; padding-top: 18px;
+    flex-shrink: 0; font-family: var(--mono); font-size: 10px; color: var(--ink-faint); }
+.streak-cal-days span { height: 12px; line-height: 12px; }
+.streak-cal-scroll { overflow-x: auto; padding-bottom: 4px; }
+.streak-cal-months { position: relative; height: 16px; white-space: nowrap;
+    font-family: var(--mono); font-size: 10px; color: var(--ink-faint); }
+.streak-cal-months span { position: absolute; top: 0; }
+.streak-cal-grid { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 12px); gap: 3px; }
+.streak-cal-cell { width: 12px; height: 12px; border-radius: 2px; background: var(--line); }
+.streak-cal-cell.level-1 { background: #D7E2F0; }
+.streak-cal-cell.level-2 { background: #7C9BC4; }
+.streak-cal-cell.level-3 { background: #2C5590; }
+.streak-cal-cell.level-4 { background: #14213F; }
 /* Dataframes (Leaderboard, Guide reference tables) otherwise render as a
    plain square-cornered grid with no relation to the card system used
    everywhere else. The hover toolbar (search/download/column-visibility) is
@@ -756,6 +777,91 @@ def _plotly_chart(fig):
     st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
 
 
+def _activity_calendar_html(uid, weeks=53):
+    """A GitHub/Anki-style activity calendar: one column per week, one row
+    per weekday, shaded by how much practice happened that day. Shading is
+    bucketed into 5 levels by that user's own quartiles of active days
+    (rather than fixed counts) so the calendar reads meaningfully whether
+    someone does 3 questions a day or 300 — a fixed scale would either wash
+    out a light user's data or top out a heavy user's on day one. Colors
+    stay inside the existing navy accent ramp instead of introducing a
+    generic green/blue heatmap scale.
+
+    Built as plain HTML/CSS rather than a Plotly figure: Streamlit clamps a
+    chart's width to its container no matter what width is requested, so a
+    53-week-wide Plotly figure just gets squeezed down to phone-width
+    (illegible) instead of overflowing into a scrollbar. A hand-built grid
+    isn't subject to that clamp, scrolls horizontally for real on a phone,
+    and gets native-tooltip hover for free via the `title` attribute."""
+    counts = db.get_daily_activity_counts(uid, days=weeks * 7 + 7)
+    today = date.today()
+    start = today - timedelta(days=weeks * 7 - 1)
+    start -= timedelta(days=(start.weekday() + 1) % 7)  # snap back to the preceding Sunday
+
+    days = pd.date_range(start, today, freq="D")
+    df = pd.DataFrame({"day": days})
+    df["date"] = df["day"].dt.date
+    df["count"] = df["date"].map(counts).fillna(0).astype(int)
+    df["week"] = (df["day"] - pd.Timestamp(start)).dt.days // 7
+    df["weekday"] = (df["day"].dt.weekday + 1) % 7  # Sun=0 .. Sat=6
+
+    nonzero = df.loc[df["count"] > 0, "count"]
+    if len(nonzero) >= 4:
+        q1, q2, q3 = (max(1, v) for v in nonzero.quantile([0.25, 0.5, 0.75]))
+        q2, q3 = max(q1, q2), max(q2, q3)
+    elif len(nonzero):
+        q1 = q2 = q3 = int(nonzero.max())
+    else:
+        q1 = q2 = q3 = 1
+
+    def level(c):
+        if c <= 0:
+            return 0
+        if c <= q1:
+            return 1
+        if c <= q2:
+            return 2
+        if c <= q3:
+            return 3
+        return 4
+
+    df["level"] = df["count"].apply(level)
+    n_weeks = int(df["week"].max()) + 1
+
+    cells_by_week: dict = {}
+    for row in df.itertuples():
+        n = row.count
+        title = f"{row.day.strftime('%b %-d, %Y')}: {n} {'activity' if n == 1 else 'activities'}"
+        cells_by_week.setdefault(row.week, {})[row.weekday] = (
+            f"<div class='streak-cal-cell level-{row.level}' title='{_esc(title)}'></div>"
+        )
+
+    col_px = 15  # 12px cell + 3px gap, must match .streak-cal-grid CSS
+    month_labels = []
+    seen_months = set()
+    for wk in range(n_weeks):
+        first_day = df.loc[df["week"] == wk, "day"].iloc[0]
+        m = first_day.strftime("%Y-%m")
+        if m not in seen_months:
+            seen_months.add(m)
+            month_labels.append(f"<span style='left:{wk * col_px}px'>{first_day.strftime('%b')}</span>")
+
+    grid_cells = "".join(
+        cells_by_week.get(wk, {}).get(wd, "<div class='streak-cal-cell level-0'></div>")
+        for wk in range(n_weeks) for wd in range(7)
+    )
+
+    return (
+        "<div class='streak-cal-wrap'>"
+        "<div class='streak-cal-days'><span>Sun</span><span>Mon</span><span>Tue</span>"
+        "<span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>"
+        "<div class='streak-cal-scroll'>"
+        f"<div class='streak-cal-months' style='width:{n_weeks * col_px}px'>{''.join(month_labels)}</div>"
+        f"<div class='streak-cal-grid' style='grid-template-columns: repeat({n_weeks}, 12px)'>{grid_cells}</div>"
+        "</div></div>"
+    )
+
+
 def subject_selectbox(label, key=None, include_all=False, default_name=None):
     names = (["All subtests"] if include_all else []) + [s["name"] for s in SUBJECTS]
     idx = 0
@@ -1070,28 +1176,22 @@ def page_dashboard():
     else:
         st.info("No practice questions answered yet. Head to **Practice Questions** to begin — your analytics will populate here.")
 
-    colA, colB = st.columns(2)
-    with colA:
-        st.markdown("### Activity (last 30 days)")
-        ts = pd.DataFrame(cached_attempts_over_time(uid, 30))
-        if not ts.empty:
-            ts["accuracy"] = ts["correct"] / ts["attempts"] * 100
-            fig2 = px.line(ts, x="day", y="attempts", markers=True)
-            fig2.update_traces(line_color="#1D3E72")
-            _theme_fig(fig2, height=280, yaxis_title="Questions", xaxis_title="")
-            _plotly_chart(fig2)
-        else:
-            st.caption("No activity recorded in the last 30 days.")
-    with colB:
-        st.markdown("### Question bank coverage")
-        qc = pd.DataFrame(cached_question_counts())
-        if not qc.empty and qc["questions"].sum() > 0:
-            fig3 = go.Figure(go.Pie(labels=qc["subject_name"], values=qc["questions"],
-                                    marker_colors=qc["color"].tolist(), hole=0.45))
-            fig3.update_traces(textfont=dict(color="#FFFFFF"))
-            _theme_fig(fig3, height=320, showlegend=True,
-                       legend=dict(orientation="h", yanchor="top", y=-0.1, x=0, font=dict(color="#3F4C63")))
-            _plotly_chart(fig3)
+    st.markdown("### Activity calendar")
+    if stats["attempts"] or streak["longest"]:
+        st.markdown(_activity_calendar_html(uid), unsafe_allow_html=True)
+        st.caption("Darker days had more practice, mock, and flashcard activity — shaded relative to your own pace.")
+    else:
+        st.caption("No activity recorded yet. Answer some **Practice Questions** to start filling this in.")
+
+    st.markdown("### Question bank coverage")
+    qc = pd.DataFrame(cached_question_counts())
+    if not qc.empty and qc["questions"].sum() > 0:
+        fig3 = go.Figure(go.Pie(labels=qc["subject_name"], values=qc["questions"],
+                                marker_colors=qc["color"].tolist(), hole=0.45))
+        fig3.update_traces(textfont=dict(color="#FFFFFF"))
+        _theme_fig(fig3, height=320, showlegend=True,
+                   legend=dict(orientation="h", yanchor="top", y=-0.1, x=0, font=dict(color="#3F4C63")))
+        _plotly_chart(fig3)
 
     st.markdown("### Pace — average time per question")
     pace_rows = cached_daily_pace(uid, 30)
