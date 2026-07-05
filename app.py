@@ -412,6 +412,95 @@ hr { border-color: var(--line) !important; }
 """, unsafe_allow_html=True)
 
 
+# ── Sound effects ───────────────────────────────────────────────────────────────
+# Streamlit strips <script> tags from st.markdown(), so any JS has to run inside
+# a components.v1.html() iframe instead. That iframe is same-origin with the
+# parent app, so a script inside it can reach window.parent.document to attach
+# a listener that fires for buttons rendered in the real app DOM. Both sounds
+# are synthesized on the fly with the Web Audio API — no audio asset files, no
+# licensing to track. The AudioContext and the click listener are stashed on
+# window.parent (not the iframe's own window) and guarded by a flag so a fresh
+# iframe injected on every Streamlit rerun reuses rather than re-installs them.
+_CLICK_SOUND_JS = """
+<script>
+(function () {
+  var w = window.parent;
+  function getCtx() {
+    if (!w.__ucatifyAudioCtx) {
+      try {
+        w.__ucatifyAudioCtx = new (w.AudioContext || w.webkitAudioContext)();
+      } catch (e) { return null; }
+    }
+    if (w.__ucatifyAudioCtx.state === "suspended") {
+      w.__ucatifyAudioCtx.resume();
+    }
+    return w.__ucatifyAudioCtx;
+  }
+  w.__ucatifyGetAudioCtx = getCtx;
+
+  function playClick() {
+    var ctx = getCtx();
+    if (!ctx) return;
+    var t = ctx.currentTime;
+    var osc = ctx.createOscillator();
+    var gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(720, t);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.1, t + 0.004);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.06);
+  }
+
+  if (!w.__ucatifyClickListenerInstalled) {
+    w.__ucatifyClickListenerInstalled = true;
+    w.document.addEventListener("click", function (e) {
+      var btn = e.target && e.target.closest && e.target.closest("button");
+      if (btn) playClick();
+    }, true);
+  }
+})();
+</script>
+"""
+
+_DING_SOUND_JS = """
+<script>
+(function () {
+  var w = window.parent;
+  var ctx = w.__ucatifyGetAudioCtx ? w.__ucatifyGetAudioCtx() : null;
+  if (!ctx) return;
+  var t = ctx.currentTime;
+  [660, 880, 1320].forEach(function (freq, i) {
+    var start = t + i * 0.09;
+    var osc = ctx.createOscillator();
+    var gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(freq, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(0.16, start + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.35);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(start);
+    osc.stop(start + 0.4);
+  });
+})();
+</script>
+"""
+
+
+def _install_click_sound():
+    components.html(_CLICK_SOUND_JS, height=0)
+
+
+def _play_ding():
+    components.html(_DING_SOUND_JS, height=0)
+
+
+_install_click_sound()
+
+
 # ── Site gate (optional) + per-account login ───────────────────────────────────
 def _check_site_password() -> bool:
     """Optional shared password that gates the whole app before individual sign-in."""
@@ -631,7 +720,7 @@ with st.sidebar:
         f"</div>",
         unsafe_allow_html=True,
     )
-    st.caption(f"👤 Signed in as **{st.session_state.get('username', '')}**")
+    st.caption(f"Signed in as **{st.session_state.get('username', '')}**")
     if st.button("Log out", width="stretch"):
         for k in list(st.session_state.keys()):
             del st.session_state[k]
@@ -644,28 +733,28 @@ with st.sidebar:
     if dte is not None:
         st.metric("Days to exam", dte)
     st.markdown("---")
-    st.caption("Set an exam date in ⚙️ Manage to enable the countdown.")
+    st.caption("Set an exam date in Manage to enable the countdown.")
 
 
 # ── Top navigation ──────────────────────────────────────────────────────────────
 NAV_ITEMS = [
-    ("📊 Dashboard", "📊", "Home"),
-    ("📝 Practice Questions", "📝", "Practice"),
-    ("🧭 UCAT Guide", "🧭", "Guide"),
-    ("🔁 Mistakes Bank", "🔁", "Fixes"),
-    ("⏱️ Mock Exam", "⏱️", "Mock"),
-    ("🏆 Leaderboard", "🏆", "Ranks"),
-    ("🃏 Flashcards", "🃏", "Cards"),
-    ("🗓️ Study Scheduler", "🗓️", "Plan"),
-    ("📚 Strategy & Skills", "📚", "Skills"),
-    ("🤖 AI Tutor", "🤖", "Tutor"),
-    ("⚙️ Manage", "⚙️", "Manage"),
+    ("Dashboard", "Home"),
+    ("Practice Questions", "Practice"),
+    ("UCAT Guide", "Guide"),
+    ("Mistakes Bank", "Fixes"),
+    ("Mock Exam", "Mock"),
+    ("Leaderboard", "Ranks"),
+    ("Flashcards", "Cards"),
+    ("Study Scheduler", "Plan"),
+    ("Strategy & Skills", "Skills"),
+    ("AI Tutor", "Tutor"),
+    ("Manage", "Manage"),
 ]
 st.session_state.setdefault("nav_page", NAV_ITEMS[0][0])
 
 with st.container(key="topnav"):
     cols = st.columns(len(NAV_ITEMS))
-    for col, (full_key, icon, short) in zip(cols, NAV_ITEMS):
+    for col, (full_key, short) in zip(cols, NAV_ITEMS):
         active = st.session_state["nav_page"] == full_key
         with col:
             if st.button(short, key=f"nav_btn_{full_key}",
@@ -680,7 +769,7 @@ page = st.session_state["nav_page"]
 # DASHBOARD
 # ════════════════════════════════════════════════════════════════════════════
 def page_dashboard():
-    st.title("📊 Dashboard")
+    st.title("Dashboard")
     ss = st.session_state
     uid = ss["user_id"]
     stats = cached_overall_stats(uid)
@@ -705,21 +794,21 @@ def page_dashboard():
         else:
             st.markdown(
                 "<div class='hero-card'><div class='hero-label'>Exam day has passed</div>"
-                "<div class='hero-sub' style='margin-top:6px'>🎉 Good luck / well done!</div></div>",
+                "<div class='hero-sub' style='margin-top:6px'>Good luck / well done!</div></div>",
                 unsafe_allow_html=True,
             )
         # Practice is the one primary action here — visually heavier (wider
         # column, filled button) than the two secondary shortcuts, so there's
         # never doubt about what to click first.
         hcols = st.columns([2, 1, 1])
-        if hcols[0].button("📝 Start practicing", width="stretch", type="primary", key="hero_practice"):
-            ss["nav_page"] = "📝 Practice Questions"
+        if hcols[0].button("Start practicing", width="stretch", type="primary", key="hero_practice"):
+            ss["nav_page"] = "Practice Questions"
             st.rerun()
-        if hcols[1].button("⏱️ Take a mock", width="stretch", key="hero_mock"):
-            ss["nav_page"] = "⏱️ Mock Exam"
+        if hcols[1].button("Take a mock", width="stretch", key="hero_mock"):
+            ss["nav_page"] = "Mock Exam"
             st.rerun()
-        if hcols[2].button("🧭 Read the Guide", width="stretch", key="hero_guide"):
-            ss["nav_page"] = "🧭 UCAT Guide"
+        if hcols[2].button("Read the Guide", width="stretch", key="hero_guide"):
+            ss["nav_page"] = "UCAT Guide"
             st.rerun()
     else:
         st.markdown(
@@ -727,8 +816,8 @@ def page_dashboard():
             "<div class='hero-sub' style='margin-top:6px'>Powers this countdown and your study plan.</div></div>",
             unsafe_allow_html=True,
         )
-        if st.button("⚙️ Set exam date", key="hero_set_date"):
-            ss["nav_page"] = "⚙️ Manage"
+        if st.button("Set exam date", key="hero_set_date"):
+            ss["nav_page"] = "Manage"
             st.rerun()
 
     # First-time onboarding nudge — only for a genuinely fresh account (no
@@ -736,11 +825,11 @@ def page_dashboard():
     # it doesn't reappear once acted on or explicitly dismissed.
     if stats["attempts"] == 0 and dte is None and not db.get_context(uid, "onboarding_dismissed"):
         with st.container(border=True):
-            st.markdown("#### 👋 New here? Start with Practice")
+            st.markdown("#### New here? Start with Practice")
             st.markdown(
                 "- **Answer a few practice questions** above — the fastest way to see what the UCAT actually feels like.\n"
                 "- **Set your exam date** above — powers the countdown and the study plan.\n"
-                "- **Skim the 🧭 UCAT Guide** when you want the full playbook — useful, but practice comes first."
+                "- **Skim the UCAT Guide** when you want the full playbook — useful, but practice comes first."
             )
             if st.button("Dismiss", key="dismiss_onboarding"):
                 db.set_context(uid, "onboarding_dismissed", "1")
@@ -756,8 +845,8 @@ def page_dashboard():
     if stats["attempts"]:
         pct = db.get_questions_answered_percentile(uid)
         if pct is not None:
-            st.caption(f"📈 You've answered more questions than **{pct}%** of students on this "
-                       f"deployment. See the full 🏆 Leaderboard for more comparisons.")
+            st.caption(f"You've answered more questions than **{pct}%** of students on this "
+                       f"deployment. See the full Leaderboard for more comparisons.")
 
     st.markdown("### Estimated scores")
     rows = cached_accuracy_by_subject(uid)
@@ -778,7 +867,7 @@ def page_dashboard():
             col.metric(r["subject_name"], band, help="Indicative SJT band (1 = strongest)")
     cog_attempted = df[df["code"].isin(COGNITIVE_CODES)]["attempts"].sum()
     if cog_attempted:
-        st.caption(f"🎯 Indicative cognitive total: **{cog_total} / 2700** "
+        st.caption(f"Indicative cognitive total: **{cog_total} / 2700** "
                    f"(VR + DM + QR, each 300–900). Estimates from accuracy only — not official UCAT scores.")
 
     st.markdown("### Accuracy by subtest")
@@ -799,9 +888,9 @@ def page_dashboard():
         ready = df[df["attempts"] > 0].sort_values("accuracy")
         weakest = ready.head(2)["subject_name"].tolist()
         if weakest:
-            st.caption(f"💡 Focus area: your lowest accuracy is in **{', '.join(weakest)}**.")
+            st.caption(f"Focus area: your lowest accuracy is in **{', '.join(weakest)}**.")
     else:
-        st.info("No practice questions answered yet. Head to **📝 Practice Questions** to begin — your analytics will populate here.")
+        st.info("No practice questions answered yet. Head to **Practice Questions** to begin — your analytics will populate here.")
 
     colA, colB = st.columns(2)
     with colA:
@@ -825,7 +914,7 @@ def page_dashboard():
             fig3.update_layout(height=280, margin=dict(t=10, b=10), showlegend=True)
             st.plotly_chart(fig3, width="stretch")
 
-    st.markdown("### ⏱️ Pace — average time per question")
+    st.markdown("### Pace — average time per question")
     pace_rows = cached_daily_pace(uid, 30)
     if pace_rows:
         pace_df = pd.DataFrame(pace_rows)
@@ -851,32 +940,32 @@ def page_dashboard():
         latest = daily.iloc[-1]
         gap = latest["avg_seconds"] - latest["target_seconds"]
         if gap > 0:
-            st.caption(f"💡 Most recently you averaged **{latest['avg_seconds']:.1f}s/question**, "
+            st.caption(f"Most recently you averaged **{latest['avg_seconds']:.1f}s/question**, "
                        f"**{gap:.1f}s slower** than the blended target of {latest['target_seconds']:.1f}s. "
                        "Speed comes with repetition — keep drilling at pace.")
         else:
-            st.caption(f"✅ Most recently you averaged **{latest['avg_seconds']:.1f}s/question**, "
+            st.caption(f"Most recently you averaged **{latest['avg_seconds']:.1f}s/question**, "
                        f"at or ahead of the blended target of {latest['target_seconds']:.1f}s. Keep it up.")
     else:
-        st.caption("No timed attempts yet. Answer questions in **📝 Practice Questions** or **⏱️ Mock Exam** "
+        st.caption("No timed attempts yet. Answer questions in **Practice Questions** or **Mock Exam** "
                    "to start tracking your pace.")
 
     # Upcoming tasks
-    st.markdown("### 🗓️ Upcoming study tasks")
+    st.markdown("### Upcoming study tasks")
     tasks = [t for t in cached_study_tasks(uid) if t["status"] != "Done"][:5]
     if tasks:
         for t in tasks:
             cols = st.columns([4, 2, 2, 1])
             sub = SUB_BY_ID.get(t["subject_id"])
             cols[0].markdown(f"**{t['title']}**" + (f" · {sub['name']}" if sub else ""))
-            cols[1].caption(f"⏱️ {t['duration_min']} min")
-            cols[2].caption(f"📅 {t['due_date'] or '—'}")
+            cols[1].caption(f"{t['duration_min']} min")
+            cols[2].caption(f"{t['due_date'] or '—'}")
             if cols[3].button("✓", key=f"dash_done_{t['id']}", help="Mark done"):
                 db.set_task_status(uid, t["id"], "Done")
                 _invalidate_tasks_cache()
                 st.rerun()
     else:
-        st.caption("No open tasks. Add some in **🗓️ Study Scheduler**.")
+        st.caption("No open tasks. Add some in **Study Scheduler**.")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1022,23 +1111,23 @@ def _render_answer_review(q, chosen):
         for k, v in options.items():
             your = "Yes" if k in chosen_set else "No"
             right = "Yes" if k in correct_set else "No"
-            mark = "✅" if your == right else "❌"
+            mark = "✓" if your == right else "✗"
             st.markdown(f"{mark} **{k}. {v}** — you said **{your}**, correct is **{right}**")
         return
     for k, v in options.items():
         if k == q["correct"]:
-            st.markdown(f"✅ **{k}. {v}**")
+            st.markdown(f"✓ **{k}. {v}**")
         elif k == chosen:
-            st.markdown(f"❌ ~~{k}. {v}~~")
+            st.markdown(f"✗ ~~{k}. {v}~~")
         else:
             st.markdown(f"&nbsp;&nbsp;&nbsp;{k}. {_esc(v)}", unsafe_allow_html=True)
 
 
 def page_practice():
-    st.title("📝 Practice Questions")
+    st.title("Practice Questions")
     ss = st.session_state
 
-    with st.expander("⚙️ Quiz settings", expanded="quiz" not in ss):
+    with st.expander("Quiz settings", expanded="quiz" not in ss):
         c1, c2, c3 = st.columns(3)
         with c1:
             sid = subject_selectbox("Subtest", key="quiz_subject", include_all=True)
@@ -1046,7 +1135,7 @@ def page_practice():
             difficulty = st.selectbox("Difficulty", ["All", "Easy", "Medium", "Hard"], key="quiz_diff")
         with c3:
             n = st.number_input("Questions", 1, 50, 5, key="quiz_n")
-        if st.button("▶️ Start quiz", type="primary"):
+        if st.button("Start quiz", type="primary"):
             pool = cached_questions(subject_id=sid, difficulty=difficulty)
             # Keep passage sets intact and in order, round-robin across subtests
             # when mixing so a short quiz reliably samples every subtest's
@@ -1065,7 +1154,7 @@ def page_practice():
                     break
                 quiz.extend(u)
             if not quiz:
-                st.warning("No questions match those filters yet. Add some in ⚙️ Manage.")
+                st.warning("No questions match those filters yet. Add some in Manage.")
             else:
                 ss["quiz"] = quiz
                 ss["quiz_idx"] = 0
@@ -1087,7 +1176,7 @@ def page_practice():
         score = ss["quiz_correct"]
         total = len(quiz)
         times = ss.get("quiz_times", {})
-        st.success(f"## ✅ Quiz complete — {score}/{total} correct ({score/total*100:.0f}%)")
+        st.success(f"## Quiz complete — {score}/{total} correct ({score/total*100:.0f}%)")
         st.progress(score / total)
         if times:
             avg_secs = sum(times.values()) / len(times)
@@ -1097,7 +1186,7 @@ def page_practice():
                        delta=f"{avg_secs - target:+.1f}s vs target", delta_color="inverse")
             c2.metric("Target for this mix", f"{target:.1f}s",
                        help="Official UCAT per-question pacing, blended across the subtests in this quiz")
-        if st.button("🔄 New quiz"):
+        if st.button("New quiz"):
             for k in ("quiz", "quiz_idx", "quiz_answered", "quiz_correct", "quiz_times"):
                 ss.pop(k, None)
             st.rerun()
@@ -1125,12 +1214,15 @@ def page_practice():
             ss["quiz_times"][idx] = elapsed
             if is_correct:
                 ss["quiz_correct"] += 1
+                ss["_play_ding"] = True
             ss["quiz_start"] = datetime.now().timestamp()
             st.rerun()
     else:
         _render_answer_review(q, answered)
         if _is_correct(q, answered):
             st.success("Correct!")
+            if ss.pop("_play_ding", False):
+                _play_ding()
         elif _is_multi(q):
             st.error("Not fully correct — every statement must be judged correctly to score this "
                      "question, as in the real UCAT.")
@@ -1139,10 +1231,10 @@ def page_practice():
         taken = ss["quiz_times"].get(idx)
         if taken is not None:
             target = seconds_per_question(SUB_BY_ID[q["subject_id"]]["code"])
-            st.caption(f"⏱️ Answered in **{taken:.1f}s** · target for {sub['name'] if sub else 'this subtest'}: ~{target:.0f}s")
+            st.caption(f"Answered in **{taken:.1f}s** · target for {sub['name'] if sub else 'this subtest'}: ~{target:.0f}s")
         if q.get("explanation"):
             st.info(f"**Explanation.** {q['explanation']}")
-        if st.button("Next ▶️", type="primary"):
+        if st.button("Next", type="primary"):
             ss["quiz_idx"] += 1
             st.rerun()
 
@@ -1151,7 +1243,7 @@ def page_practice():
 # MISTAKES BANK
 # ════════════════════════════════════════════════════════════════════════════
 def page_mistakes():
-    st.title("🔁 Mistakes Bank")
+    st.title("Mistakes Bank")
     st.caption(f"Every question you get wrong lands here, and comes up more often in Practice until "
                f"you answer it correctly {db.MISTAKE_CLEAR_STREAK} times in a row.")
     ss = st.session_state
@@ -1167,11 +1259,11 @@ def page_mistakes():
               "row after missing it — cleared from the bank.")
 
     if not unresolved:
-        st.success("🎉 No unresolved mistakes right now — nice work. Keep practising and anything you "
+        st.success("No unresolved mistakes right now — nice work. Keep practising and anything you "
                    "miss will show up here.")
         return
 
-    if st.button("▶️ Practice my mistakes", type="primary"):
+    if st.button("Practice my mistakes", type="primary"):
         mistake_ids = {m["question_id"] for m in unresolved}
         pool = [q for q in cached_questions() if q["id"] in mistake_ids]
         seen_map = cached_last_seen(uid)
@@ -1185,7 +1277,7 @@ def page_mistakes():
         ss["quiz_correct"] = 0
         ss["quiz_times"] = {}
         ss["quiz_start"] = datetime.now().timestamp()
-        ss["nav_page"] = "📝 Practice Questions"
+        ss["nav_page"] = "Practice Questions"
         st.rerun()
 
     st.markdown("### Needs work")
@@ -1199,7 +1291,7 @@ def page_mistakes():
                        "correct in a row to clear")
 
     if resolved:
-        with st.expander(f"✅ Mastered ({len(resolved)})"):
+        with st.expander(f"Mastered ({len(resolved)})"):
             for m in resolved:
                 st.markdown(pill(m["subject_name"], m["color"]) + f"&nbsp; {_esc(m['stem'][:120])}"
                            f"{'…' if len(m['stem']) > 120 else ''}", unsafe_allow_html=True)
@@ -1209,7 +1301,7 @@ def page_mistakes():
 # FLASHCARDS
 # ════════════════════════════════════════════════════════════════════════════
 def page_flashcards():
-    st.title("🃏 Flashcards")
+    st.title("Flashcards")
     st.caption("Spaced repetition (SM-2). Rate each card honestly — harder cards come back sooner.")
     ss = st.session_state
     uid = ss["user_id"]
@@ -1232,9 +1324,9 @@ def page_flashcards():
     cards = cached_flashcards(uid, subject_id=sid, due_only=due_only)
     if not cards:
         if due_only:
-            st.success("🎉 No cards due right now. Toggle off **Due only** to review ahead, or add cards in ⚙️ Manage.")
+            st.success("No cards due right now. Toggle off **Due only** to review ahead, or add cards in Manage.")
         else:
-            st.info("No flashcards yet. Add some in ⚙️ Manage.")
+            st.info("No flashcards yet. Add some in Manage.")
         return
 
     if "fc_pos" not in ss or ss.get("fc_count") != len(cards):
@@ -1256,13 +1348,13 @@ def page_flashcards():
     st.write("")
 
     if not ss.get("fc_show_back"):
-        if st.button("🔄 Show answer", type="primary", width="stretch"):
+        if st.button("Show answer", type="primary", width="stretch"):
             ss["fc_show_back"] = True
             st.rerun()
     else:
         st.caption("How well did you recall it?")
         cols = st.columns(4)
-        ratings = [("😖 Again", 0), ("😬 Hard", 3), ("🙂 Good", 4), ("😎 Easy", 5)]
+        ratings = [("Again", 0), ("Hard", 3), ("Good", 4), ("Easy", 5)]
         for col, (lbl, quality) in zip(cols, ratings):
             if col.button(lbl, key=f"fc_rate_{quality}", width="stretch"):
                 db.review_flashcard(uid, card["id"], quality)
@@ -1277,11 +1369,11 @@ def page_flashcards():
 # STUDY SCHEDULER
 # ════════════════════════════════════════════════════════════════════════════
 def page_scheduler():
-    st.title("🗓️ Study Scheduler")
+    st.title("Study Scheduler")
     ss = st.session_state
     uid = ss["user_id"]
 
-    with st.expander("➕ Add a study task"):
+    with st.expander("Add a study task"):
         with st.form("add_task", clear_on_submit=True):
             c1, c2 = st.columns(2)
             title = c1.text_input("Task", placeholder="e.g. Review enzyme kinetics + 10 Qs")
@@ -1306,14 +1398,14 @@ def page_scheduler():
                     st.warning("Give the task a title.")
 
     # Auto-generate a plan
-    with st.expander("✨ Generate a study plan"):
+    with st.expander("Generate a study plan"):
         st.caption("Creates a Review + Practice + Flashcards task per subtest, spread across the days you choose — "
                    "with extra practice sessions weighted toward your weakest subtests.")
         dte, _ = days_to_exam()
         default_days = min(60, max(3, dte)) if dte and dte > 0 else 14
         gc1, gc2 = st.columns(2)
         weeks = gc1.number_input("Spread over (days)", 3, 60, default_days,
-                                 help="Defaults to your days-until-exam (set in ⚙️ Manage) when available.")
+                                 help="Defaults to your days-until-exam (set in Manage) when available.")
         per_day = gc2.number_input("Tasks per day", 1, 6, 2)
 
         acc_rows = cached_accuracy_by_subject(uid)
@@ -1322,7 +1414,7 @@ def page_scheduler():
         if attempted:
             ranked = sorted(attempted, key=lambda r: r["correct"] / r["attempts"])
             weak_ids = [r["subject_id"] for r in ranked[:2]]
-            st.caption(f"📉 Extra practice sessions weighted toward your current weak areas: "
+            st.caption(f"Extra practice sessions weighted toward your current weak areas: "
                        f"**{', '.join(SUB_BY_ID[sid]['name'] for sid in weak_ids)}**.")
 
         if st.button("Generate plan"):
@@ -1364,7 +1456,7 @@ def page_scheduler():
         if all_tasks:
             st.info(f"Nothing in **{filt}** right now — try a different filter above.")
         else:
-            st.info("📭 No tasks yet — add one above, or click **✨ Generate a study plan** "
+            st.info("No tasks yet — add one above, or click **Generate a study plan** "
                      "for a ready-made schedule across every subtest.")
         return
 
@@ -1387,9 +1479,9 @@ def page_scheduler():
         title_md = f"~~{_esc(t['title'])}~~" if done else f"**{_esc(t['title'])}**"
         badge = pill(sub["name"], sub["color"]) if sub else ""
         cols[1].markdown(f"{title_md}  {badge}", unsafe_allow_html=True)
-        cols[2].caption(f"🏷️ {t['task_type']} · ⏱️ {t['duration_min']}m")
+        cols[2].caption(f"{t['task_type']} · {t['duration_min']}m")
         date_txt = t["due_date"] or "—"
-        cols[3].markdown(f"<span style='color:{'#c0392b' if overdue else '#888'}'>📅 {date_txt}{' (overdue)' if overdue else ''}</span>", unsafe_allow_html=True)
+        cols[3].markdown(f"<span style='color:{'#c0392b' if overdue else '#888'}'>{date_txt}{' (overdue)' if overdue else ''}</span>", unsafe_allow_html=True)
         status = cols[4].selectbox("", ["Todo", "In Progress", "Done"],
                                    index=["Todo", "In Progress", "Done"].index(t["status"]),
                                    key=f"task_status_{t['id']}", label_visibility="collapsed")
@@ -1397,7 +1489,7 @@ def page_scheduler():
             db.set_task_status(uid, t["id"], status)
             _invalidate_tasks_cache()
             st.rerun()
-        if cols[5].button("🗑️", key=f"task_del_{t['id']}"):
+        if cols[5].button("×", key=f"task_del_{t['id']}", help="Delete task"):
             db.delete_study_task(uid, t["id"])
             _invalidate_tasks_cache()
             st.rerun()
@@ -1460,7 +1552,7 @@ def _g_example(color, q, a, trap=None):
     if trap:
         st.markdown(
             f"<div style='background:var(--coral-wash,#F6E6E1);border-radius:8px;padding:.5rem .9rem;"
-            f"font-size:.9rem;color:#8a3324;margin:.4rem 0 1.2rem'><b>⚠ Trap —</b> {trap}</div>",
+            f"font-size:.9rem;color:#8a3324;margin:.4rem 0 1.2rem'><b>Trap —</b> {trap}</div>",
             unsafe_allow_html=True,
         )
 
@@ -1693,8 +1785,8 @@ def page_guide():
     # ── 04-07 · Subtest deep dives ───────────────────────────────────────────
     st.markdown("`04–07`")
     st.header("Subtest deep dives")
-    tab_vr, tab_dm, tab_qr, tab_sjt = st.tabs(["📖 Verbal Reasoning", "🧩 Decision Making",
-                                                "🔢 Quantitative Reasoning", "🩺 Situational Judgement"])
+    tab_vr, tab_dm, tab_qr, tab_sjt = st.tabs(["Verbal Reasoning", "Decision Making",
+                                                "Quantitative Reasoning", "Situational Judgement"])
     with tab_vr:
         _g_subtest_tab(
             "VR", vr_c,
@@ -2036,7 +2128,7 @@ def page_guide():
                    (("Keele's ~1700 example", 1700), ("Sheffield's ~1800 example", 1800))
                    if post_score >= threshold]
         if cleared:
-            st.caption(f"✅ Would have cleared: {', '.join(cleared)}. Weighted schools like Exeter's example "
+            st.caption(f"Would have cleared: {', '.join(cleared)}. Weighted schools like Exeter's example "
                        "have no fixed line to clear either way.")
         else:
             st.caption("This wouldn't have cleared either illustrative threshold example above — weighted-approach "
@@ -2101,7 +2193,7 @@ def page_guide():
 # CONTENT REVIEW
 # ════════════════════════════════════════════════════════════════════════════
 def page_content():
-    st.title("📚 Strategy & Skills")
+    st.title("Strategy & Skills")
     c1, c2 = st.columns([3, 1])
     with c1:
         sid = subject_selectbox("Subtest", key="content_subject", include_all=True)
@@ -2110,7 +2202,7 @@ def page_content():
 
     topics = cached_topics(subject_id=sid, high_yield_only=hy)
     if not topics:
-        st.info("No topics found. Add review notes in ⚙️ Manage.")
+        st.info("No topics found. Add review notes in Manage.")
         return
 
     # group by subject
@@ -2122,16 +2214,16 @@ def page_content():
         color = items[0]["color"]
         st.markdown(f"### {pill(sname, color)}", unsafe_allow_html=True)
         for t in items:
-            label = ("⭐ " if t["high_yield"] else "") + t["name"]
+            label = ("High-yield — " if t["high_yield"] else "") + t["name"]
             with st.expander(label):
                 if t.get("summary"):
                     st.caption(t["summary"])
                 st.markdown(t.get("content") or "_No notes yet._")
-                if st.button("💬 Ask the AI Tutor about this", key=f"asktutor_{t['id']}"):
+                if st.button("Ask the AI Tutor about this", key=f"asktutor_{t['id']}"):
                     st.session_state["tutor_prefill"] = (
                         f'Can you help me understand "{t["name"]}"? {t.get("summary") or ""}'
                     ).strip()
-                    st.session_state["nav_page"] = "🤖 AI Tutor"
+                    st.session_state["nav_page"] = "AI Tutor"
                     st.rerun()
 
 
@@ -2211,7 +2303,7 @@ def _tutor_api_key(uid):
 
 
 def page_tutor():
-    st.title("🤖 AI Tutor")
+    st.title("AI Tutor")
     uid = st.session_state["user_id"]
     api_key, key_source = _tutor_api_key(uid)
     if not _HAS_ANTHROPIC:
@@ -2221,7 +2313,7 @@ def page_tutor():
     if not api_key:
         st.warning(
             "The AI Tutor needs an Anthropic API key. Add your own personal key in "
-            "⚙️ Manage → Account to start chatting — your usage will be billed to you, not shared "
+            "Manage → Account to start chatting — your usage will be billed to you, not shared "
             "with anyone else on this deployment."
         )
         return
@@ -2237,7 +2329,7 @@ def page_tutor():
     else:
         caption += " (using your personal API key)"
     cols[0].caption(caption)
-    if cols[1].button("🗑️ Clear chat"):
+    if cols[1].button("Clear chat"):
         db.clear_chat_history(uid)
         st.rerun()
 
@@ -2292,7 +2384,7 @@ def page_tutor():
                 # text to the end user can leak internal details (request IDs,
                 # SDK internals, occasionally fragments of request context).
                 print(f"AI Tutor error for user {uid}: {e}")
-                answer = "⚠️ Sorry, the tutor hit an error processing that. Please try again in a moment."
+                answer = "Sorry, the tutor hit an error processing that. Please try again in a moment."
             st.markdown(answer)
             db.save_message(uid, "assistant", answer)
         st.rerun()
@@ -2302,7 +2394,7 @@ def page_tutor():
 # MANAGE
 # ════════════════════════════════════════════════════════════════════════════
 def page_manage():
-    st.title("⚙️ Manage")
+    st.title("Manage")
     uid = st.session_state["user_id"]
     is_admin = _is_content_admin()
     tabs = st.tabs(["Account", "Exam date", "Questions", "Flashcards", "Topics"])
@@ -2333,7 +2425,7 @@ def page_manage():
         st.divider()
         st.markdown("**AI Tutor — personal API key**")
         if db.has_user_api_key(uid):
-            st.caption("✅ A personal Anthropic API key is set. Your Tutor conversations are billed to "
+            st.caption("A personal Anthropic API key is set. Your Tutor conversations are billed to "
                        "your own key, not shared with anyone else on this deployment.")
             if st.button("Remove personal API key"):
                 db.clear_user_api_key(uid)
@@ -2366,7 +2458,7 @@ def page_manage():
     # Questions
     with tabs[2]:
         if not is_admin:
-            st.info("🔒 Adding, editing and deleting shared questions is limited to admins on this "
+            st.info("Adding, editing and deleting shared questions is limited to admins on this "
                      "deployment. You can still browse and search the bank below.")
         else:
             with st.form("add_q", clear_on_submit=True):
@@ -2398,7 +2490,7 @@ def page_manage():
                         st.warning("Fill in the stem and at least options A–D.")
         st.divider()
         qs = db.get_questions(include_inactive=True)
-        search = st.text_input("🔍 Search questions", key="mq_search",
+        search = st.text_input("Search questions", key="mq_search",
                                 placeholder="Filter by keyword or subtest…")
         filtered = qs
         if search:
@@ -2407,7 +2499,7 @@ def page_manage():
                        or needle in SUB_BY_ID.get(q["subject_id"], {}).get("name", "").lower()]
         st.caption(f"{len(filtered)} of {len(qs)} questions" if search else f"{len(qs)} questions in the bank")
         for q in _paginate(filtered, "mq_page"):
-            retired = "" if (q.get("active") in (1, None)) else " · 🚫 retired"
+            retired = "" if (q.get("active") in (1, None)) else " · retired"
             with st.expander(f"[{SUB_BY_ID.get(q['subject_id'],{}).get('name','?')}] {q['stem'][:70]}{retired}"):
                 locked = q.get("question_format") == "multi" or q.get("passage_id")
                 edit_key = f"editq_{q['id']}"
@@ -2480,7 +2572,7 @@ def page_manage():
     # Flashcards
     with tabs[3]:
         if not is_admin:
-            st.info("🔒 Adding, editing and deleting shared flashcards is limited to admins on this "
+            st.info("Adding, editing and deleting shared flashcards is limited to admins on this "
                      "deployment. You can still browse and search the bank below.")
         else:
             with st.form("add_fc", clear_on_submit=True):
@@ -2498,7 +2590,7 @@ def page_manage():
                         st.warning("Fill in both sides.")
         st.divider()
         cards = cached_flashcard_bank()
-        fc_search = st.text_input("🔍 Search flashcards", key="mfc_search",
+        fc_search = st.text_input("Search flashcards", key="mfc_search",
                                    placeholder="Filter by keyword or subtest…")
         fc_filtered = cards
         if fc_search:
@@ -2548,14 +2640,14 @@ def page_manage():
     # Topics
     with tabs[4]:
         if not is_admin:
-            st.info("🔒 Adding, editing and deleting shared topics is limited to admins on this "
+            st.info("Adding, editing and deleting shared topics is limited to admins on this "
                      "deployment. You can still browse below.")
         else:
             with st.form("add_topic", clear_on_submit=True):
                 st.markdown("**Add a review topic**")
                 sname = st.selectbox("Subtest", [s["name"] for s in SUBJECTS], key="mt_sub")
                 name = st.text_input("Topic name")
-                hy = st.checkbox("High-yield ⭐")
+                hy = st.checkbox("High-yield")
                 summary = st.text_input("One-line summary")
                 content = st.text_area("Notes (Markdown supported)", height=160)
                 if st.form_submit_button("Add topic", type="primary"):
@@ -2571,7 +2663,7 @@ def page_manage():
         topics_all = cached_topics()
         st.caption(f"{len(topics_all)} topics")
         for t in topics_all:
-            with st.expander(f"{'⭐ ' if t['high_yield'] else ''}[{t['subject_name']}] {t['name']}"):
+            with st.expander(f"{'High-yield — ' if t['high_yield'] else ''}[{t['subject_name']}] {t['name']}"):
                 edit_key = f"editt_{t['id']}"
                 if not is_admin:
                     st.markdown(t.get("content") or "_No notes._")
@@ -2582,7 +2674,7 @@ def page_manage():
                         sname_e = st.selectbox("Subtest", subj_names, index=subj_names.index(cur_subj),
                                                 key=f"et_sub_{t['id']}")
                         name_e = st.text_input("Topic name", value=t["name"], key=f"et_name_{t['id']}")
-                        hy_e = st.checkbox("High-yield ⭐", value=bool(t["high_yield"]), key=f"et_hy_{t['id']}")
+                        hy_e = st.checkbox("High-yield", value=bool(t["high_yield"]), key=f"et_hy_{t['id']}")
                         summary_e = st.text_input("One-line summary", value=t.get("summary") or "",
                                                    key=f"et_sum_{t['id']}")
                         content_e = st.text_area("Notes (Markdown supported)", value=t.get("content") or "",
@@ -2689,7 +2781,7 @@ def _mock_results(ss):
 
 
 def page_mock():
-    st.title("⏱️ Mock Exam")
+    st.title("Mock Exam")
     ss = st.session_state
 
     # ── Results screen ────────────────────────────────────────────────────────
@@ -2698,9 +2790,9 @@ def page_mock():
         total_q = sum(r["total"] for r in rows.values())
         total_correct = sum(r["correct"] for r in rows.values())
         used = ss.get("mock_elapsed", 0)
-        st.success(f"## ✅ Mock complete — {total_correct}/{total_q} correct "
+        st.success(f"## Mock complete — {total_correct}/{total_q} correct "
                    f"({(total_correct/total_q*100) if total_q else 0:.0f}%)")
-        st.caption(f"⏱️ Time used: {fmt_mmss(used)} of {fmt_mmss(ss.get('mock_budget', 0))}")
+        st.caption(f"Time used: {fmt_mmss(used)} of {fmt_mmss(ss.get('mock_budget', 0))}")
 
         answered_times = {i: t for i, t in ss.get("mock_times", {}).items()
                            if ss["mock_answers"].get(i) and t}
@@ -2726,7 +2818,7 @@ def page_mock():
             else:
                 col.metric(r["name"], est_sjt_band(acc), help=f"{r['correct']}/{r['total']} correct · indicative band")
         if cog_any:
-            st.caption(f"🎯 Indicative cognitive total: **{cog_total} / 2700**. "
+            st.caption(f"Indicative cognitive total: **{cog_total} / 2700**. "
                        "Estimates from accuracy only — not official UCAT scores. "
                        "All answers were saved to your analytics.")
 
@@ -2735,7 +2827,7 @@ def page_mock():
                 chosen = ss["mock_answers"].get(i)
                 skipped = chosen is None
                 ok = (not skipped) and _is_correct(q, chosen)
-                mark = "✅" if ok else ("⏭️" if skipped else "❌")
+                mark = "✓" if ok else ("–" if skipped else "✗")
                 st.markdown(f"{mark} **{q['stem'][:90]}**")
                 if _is_multi(q):
                     st.caption(f"Your Yes answers: {chosen.replace(',', ', ') if chosen else '— none'} · "
@@ -2746,9 +2838,9 @@ def page_mock():
                     st.caption(f"Your answer: {chosen or '— (skipped)'} · "
                                f"Correct: {q['correct']} ({opts.get(q['correct'], '?')})")
                 if q.get("explanation"):
-                    st.caption(f"💡 {q['explanation']}")
+                    st.caption(f"{q['explanation']}")
 
-        if st.button("🔄 New mock", type="primary"):
+        if st.button("New mock", type="primary"):
             for k in list(ss.keys()):
                 if k.startswith("mock"):
                     ss.pop(k, None)
@@ -2760,7 +2852,7 @@ def page_mock():
         st.markdown("Sit a timed, UCAT-paced mock using your question bank. Each subtest is "
                     "timed at the real per-question rate, so the clock pressure mirrors the exam.")
         st.caption("Official pacing — VR 44Q/21m · DM 35Q/37m · QR 36Q/26m · SJT 69Q/26m. "
-                   "Add more questions in ⚙️ Manage to lengthen your mocks.")
+                   "Add more questions in Manage to lengthen your mocks.")
 
         mock_summary = db.get_mock_summary(ss["user_id"])
         if mock_summary["count"]:
@@ -2778,11 +2870,11 @@ def page_mock():
         # preview count + budget
         preview_q, preview_budget = _build_mock(subtest_ids)
         if not preview_q:
-            st.warning("No questions available for that selection. Add some in ⚙️ Manage.")
+            st.warning("No questions available for that selection. Add some in Manage.")
             return
-        st.info(f"📋 {len(preview_q)} questions · ⏱️ {fmt_mmss(preview_budget)} total")
+        st.info(f"{len(preview_q)} questions · {fmt_mmss(preview_budget)} total")
 
-        if st.button("▶️ Start mock", type="primary"):
+        if st.button("Start mock", type="primary"):
             quiz, budget = _build_mock(subtest_ids)
             ss["mock"] = quiz
             ss["mock_idx"] = 0
@@ -2822,9 +2914,9 @@ def page_mock():
 
     # ── Paused screen ────────────────────────────────────────────────────────
     if paused:
-        st.info(f"⏸ **Mock paused** — {fmt_mmss(remaining)} remaining · on question {idx + 1} of {len(quiz)}.")
+        st.info(f"**Mock paused** — {fmt_mmss(remaining)} remaining · on question {idx + 1} of {len(quiz)}.")
         st.caption("The clock and your progress are frozen. Resume whenever you're ready to continue.")
-        if st.button("▶️ Resume", type="primary"):
+        if st.button("Resume", type="primary"):
             pause_duration = datetime.now().timestamp() - ss.get("mock_paused_since", now)
             # Shift every recorded question-start timestamp forward by the
             # pause duration so the per-question pace stats computed later
@@ -2849,7 +2941,7 @@ def page_mock():
               const el = document.getElementById('ucat-timer');
               function tick() {{
                 const m = Math.floor(Math.max(0,r)/60), s = Math.max(0,r)%60;
-                el.textContent = '⏱️ ' + m + ':' + String(s).padStart(2,'0') + ' remaining';
+                el.textContent = m + ':' + String(s).padStart(2,'0') + ' remaining';
                 if (r > 0) {{ r--; setTimeout(tick, 1000); }}
               }}
               tick();
@@ -2858,7 +2950,7 @@ def page_mock():
     with top[1]:
         st.progress(idx / len(quiz), text=f"Question {idx + 1} of {len(quiz)}")
     with top[2]:
-        if st.button("⏸ Pause", width="stretch"):
+        if st.button("Pause", width="stretch"):
             ss["mock_elapsed_accum"] = elapsed
             ss["mock_paused_since"] = datetime.now().timestamp()
             ss["mock_paused"] = True
@@ -2903,7 +2995,7 @@ def page_mock():
         ss["mock_times"][idx] = round(datetime.now().timestamp() - ss["mock_q_start"].get(idx, datetime.now().timestamp()), 1)
         ss["mock_idx"] += 1
         st.rerun()
-    if nav[3].button("🏁 Finish & grade"):
+    if nav[3].button("Finish & grade"):
         if choice:
             ss["mock_answers"][idx] = choice
             ss["mock_times"][idx] = round(datetime.now().timestamp() - ss["mock_q_start"].get(idx, datetime.now().timestamp()), 1)
@@ -2919,7 +3011,7 @@ def _render_leaderboard(rows, uid, value_fmt, top_n=10):
         st.info("No qualifying data yet — be the first to set a benchmark.")
         return
 
-    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+    medals = {1: "1st", 2: "2nd", 3: "3rd"}
     top = rows[:top_n]
     df = pd.DataFrame([
         {"Rank": medals.get(i, str(i)), "Student": r["username"] + (" (you)" if r["user_id"] == uid else ""),
@@ -2938,11 +3030,11 @@ def _render_leaderboard(rows, uid, value_fmt, top_n=10):
 
 
 def page_leaderboard():
-    st.title("🏆 Leaderboard")
+    st.title("Leaderboard")
     st.caption("See how your prep compares. Rankings are shared across every signed-in student.")
     uid = st.session_state["user_id"]
 
-    tab1, tab2, tab3 = st.tabs(["📝 Most Questions Answered", "⏱️ Fastest Pace", "🎯 Best Mock Score"])
+    tab1, tab2, tab3 = st.tabs(["Most Questions Answered", "Fastest Pace", "Best Mock Score"])
 
     with tab1:
         st.caption("Total practice + mock questions answered, all-time.")
@@ -2961,16 +3053,16 @@ def page_leaderboard():
 
 # ── Router ────────────────────────────────────────────────────────────────────
 PAGES = {
-    "📊 Dashboard": page_dashboard,
-    "🧭 UCAT Guide": page_guide,
-    "📝 Practice Questions": page_practice,
-    "🔁 Mistakes Bank": page_mistakes,
-    "⏱️ Mock Exam": page_mock,
-    "🏆 Leaderboard": page_leaderboard,
-    "🃏 Flashcards": page_flashcards,
-    "🗓️ Study Scheduler": page_scheduler,
-    "📚 Strategy & Skills": page_content,
-    "🤖 AI Tutor": page_tutor,
-    "⚙️ Manage": page_manage,
+    "Dashboard": page_dashboard,
+    "UCAT Guide": page_guide,
+    "Practice Questions": page_practice,
+    "Mistakes Bank": page_mistakes,
+    "Mock Exam": page_mock,
+    "Leaderboard": page_leaderboard,
+    "Flashcards": page_flashcards,
+    "Study Scheduler": page_scheduler,
+    "Strategy & Skills": page_content,
+    "AI Tutor": page_tutor,
+    "Manage": page_manage,
 }
 PAGES[page]()
