@@ -266,6 +266,7 @@ button[kind^="secondary"]:active { transform: scale(0.97); }
 [data-testid="column"]:nth-child(2) [data-testid="metric-container"] { animation-delay: 40ms; }
 [data-testid="column"]:nth-child(3) [data-testid="metric-container"] { animation-delay: 80ms; }
 [data-testid="column"]:nth-child(4) [data-testid="metric-container"] { animation-delay: 120ms; }
+[data-testid="column"]:nth-child(5) [data-testid="metric-container"] { animation-delay: 160ms; }
 
 @media (prefers-reduced-motion: reduce) {
     [data-testid="metric-container"], .flashcard, [data-testid="stAlertContainer"], .hero-card,
@@ -430,6 +431,57 @@ hr { border-color: var(--line) !important; }
 .auth-hero h2 { font-family: var(--serif); margin-bottom:4px; color: var(--ink); }
 .auth-hero .eyebrow { font-family: var(--mono); font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color: var(--teal); margin-bottom:6px; }
 .auth-hero p { color: var(--ink-soft); margin-bottom:28px; font-size:14px; }
+
+/* Day streak milestone celebration — a quiet flame accent that only appears
+   the day a streak milestone (3, 7, 14, 30...) is first reached, not a
+   permanent badge competing with the number the rest of the time. Tiers
+   escalate by size/glow/ember count as the streak grows, all in the
+   existing gold accent rather than a new "fire" hue, and stay within the
+   app's ease-out-quint, no-bounce motion language. */
+@keyframes streakFlicker {
+    0%, 100% { transform: scale(1) rotate(0deg); }
+    25%      { transform: scale(1.04, 0.97) rotate(-2deg); }
+    50%      { transform: scale(0.97, 1.05) rotate(1deg); }
+    75%      { transform: scale(1.03, 0.98) rotate(-1deg); }
+}
+@keyframes streakPop {
+    from { opacity: 0; transform: translateY(10px) scale(0.82); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes emberRise {
+    0%   { opacity: 0; transform: translateY(0) scale(0.6); }
+    15%  { opacity: 1; }
+    100% { opacity: 0; transform: translateY(-30px) scale(1); }
+}
+.streak-flame-wrap {
+    position: relative; display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; margin-top: 6px;
+    animation: streakPop .5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.streak-flame {
+    width: 100%; height: 100%; transform-origin: 50% 85%;
+    animation: streakFlicker 2.6s ease-in-out infinite;
+    filter: drop-shadow(0 0 6px rgba(186,143,78,0.55));
+}
+.streak-flame.tier-steady { width: 120%; height: 120%; filter: drop-shadow(0 0 9px rgba(186,143,78,0.7)); }
+.streak-flame.tier-blaze  { width: 140%; height: 140%; filter: drop-shadow(0 0 13px rgba(186,143,78,0.85)); }
+.streak-ember {
+    position: absolute; bottom: 4px; width: 4px; height: 4px; border-radius: 50%;
+    background: var(--gold); opacity: 0;
+    animation: emberRise 1.6s ease-out infinite;
+}
+.streak-ember:nth-child(2) { left: 6px;  animation-delay: .3s; }
+.streak-ember:nth-child(3) { left: 18px; animation-delay: .9s; }
+.streak-ember:nth-child(4) { left: 24px; animation-delay: .1s; }
+.streak-caption {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .04em; color: var(--gold);
+    margin-top: 2px; animation: fadeSlideIn .4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+    .streak-flame-wrap, .streak-flame, .streak-ember, .streak-caption {
+        animation: none !important;
+    }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -833,6 +885,58 @@ with st.container(key="topnav"):
 page = st.session_state["nav_page"]
 
 
+_STREAK_MILESTONES = [3, 7, 14, 30, 60, 100, 180, 365]
+
+_STREAK_FLAME_SVG = """
+<svg class="streak-flame tier-{tier}" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <path fill="var(--gold)" d="M12 2C12 2 6.5 7.8 6.5 13.2C6.5 17.6 8.9 21 12.3 21C15.9 21 18.2 17.5 18.2 13.6C18.2 10.9 16.6 8.8 15.1 7.2C15.3 9 14.3 10.6 12.9 10.6C11.6 10.6 11.4 9 12 7.2C12.5 5.7 12 2 12 2Z"/>
+  <path fill="var(--gold-wash)" opacity="0.9" d="M12.4 12C12.4 12 10.2 14.3 10.2 16.4C10.2 18.1 11.2 19.4 12.6 19.4C14.1 19.4 15.1 18 15.1 16.3C15.1 14.7 13.9 13.2 12.9 12.3C13 13 12.6 13.6 12.1 13.6C11.6 13.6 11.5 13 11.7 12.4C11.9 11.9 12.4 12 12.4 12Z"/>
+</svg>
+"""
+
+
+def _streak_tier(days):
+    if days >= 30:
+        return "blaze"
+    if days >= 7:
+        return "steady"
+    return "spark"
+
+
+def _streak_milestone_html(uid, current):
+    """Renders the flame + ember celebration exactly once, the day a streak
+    milestone (3, 7, 14, 30...) is first reached — not a permanent badge, so
+    it doesn't compete with the day count the rest of the time.
+
+    "Already celebrated" is keyed off the current unbroken run's start date
+    (today minus `current - 1` days) rather than the raw streak number, since
+    a raw-number comparison can't tell "same run continuing" apart from
+    "broke and rebuilt to the identical count" — e.g. a 3-day streak that
+    breaks and later rebuilds to exactly 3 again is a different run and
+    should celebrate again, even though 3 is not greater than 3. Two runs
+    only ever share a start date if they're the same run, so this comparison
+    is exact regardless of how long ago the last dashboard visit was."""
+    if current <= 0:
+        return ""
+    run_start = (date.today() - timedelta(days=current - 1)).isoformat()
+    stored_run_start = db.get_context(uid, "streak_run_start")
+    last_celebrated = int(db.get_context(uid, "streak_last_celebrated") or 0)
+    if stored_run_start != run_start:
+        last_celebrated = 0
+        db.set_context(uid, "streak_run_start", run_start)
+
+    if current not in _STREAK_MILESTONES or current <= last_celebrated:
+        return ""
+    db.set_context(uid, "streak_last_celebrated", str(current))
+    flame = _STREAK_FLAME_SVG.format(tier=_streak_tier(current))
+    return (
+        f"<div class='streak-flame-wrap'>{flame}"
+        f"<span class='streak-ember'></span><span class='streak-ember'></span>"
+        f"<span class='streak-ember'></span></div>"
+        f"<div class='streak-caption'>{current}-day streak!</div>"
+    )
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # DASHBOARD
 # ════════════════════════════════════════════════════════════════════════════
@@ -903,7 +1007,13 @@ def page_dashboard():
                 db.set_context(uid, "onboarding_dismissed", "1")
                 st.rerun()
 
-    c1, c2, c3, c4 = st.columns(4)
+    streak = db.get_streak(uid)
+    c0, c1, c2, c3, c4 = st.columns(5)
+    c0.metric("Day streak", streak["current"],
+              help="Consecutive days you've answered practice questions, sat a mock, or reviewed flashcards")
+    milestone_html = _streak_milestone_html(uid, streak["current"])
+    if milestone_html:
+        c0.markdown(milestone_html, unsafe_allow_html=True)
     c1.metric("Questions answered", stats["attempts"])
     c2.metric("Accuracy", f"{acc:.0f}%")
     c3.metric("Cards mastered", f"{stats['cards_mastered']}/{stats['cards']}")
