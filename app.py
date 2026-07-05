@@ -349,7 +349,7 @@ button[kind^="secondary"]:active { transform: scale(0.97); }
         min-width: fit-content !important; width: auto !important; flex: 0 0 auto !important;
     }
     .st-key-topnav button {
-        font-size: 13px !important; padding: 10px 16px !important; min-height: 42px;
+        font-size: 13px !important; padding: 10px 16px !important; min-height: 44px;
         white-space: nowrap !important;
     }
 }
@@ -390,6 +390,16 @@ hr { border-color: var(--line) !important; }
     background: var(--card); border: 1px solid var(--line); border-radius: 10px;
     padding: 10px 14px 2px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
+/* Dataframes (Leaderboard, Guide reference tables) otherwise render as a
+   plain square-cornered grid with no relation to the card system used
+   everywhere else. The hover toolbar (search/download/column-visibility) is
+   a generic-widget tell that serves no purpose on read-only reference and
+   leaderboard tables here, so it's hidden rather than restyled. */
+[data-testid="stDataFrame"] {
+    border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+[data-testid="stElementToolbar"] { display: none !important; }
 .flashcard {
     background: var(--card); border: 1px solid var(--line); border-radius: 14px;
     padding: 38px 28px; text-align: center; font-size: 19px; color: var(--ink);
@@ -2359,6 +2369,9 @@ def page_tutor():
             "Manage → Account to start chatting — your usage will be billed to you, not shared "
             "with anyone else on this deployment."
         )
+        if st.button("Go to Manage", type="primary", key="tutor_go_manage"):
+            st.session_state["nav_page"] = "Manage"
+            st.rerun()
         return
 
     # The daily quota protects the deployment owner's own spend, so it only
