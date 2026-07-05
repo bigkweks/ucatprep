@@ -258,7 +258,8 @@ button[kind^="secondary"]:active { transform: scale(0.97); }
     from { opacity: 0; transform: translateY(8px); }
     to   { opacity: 1; transform: translateY(0); }
 }
-[data-testid="metric-container"], .flashcard, [data-testid="stAlertContainer"], .hero-card {
+[data-testid="metric-container"], .flashcard, [data-testid="stAlertContainer"], .hero-card,
+[data-testid="stPlotlyChart"] {
     animation: fadeSlideIn .32s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 [data-testid="column"]:nth-child(1) [data-testid="metric-container"] { animation-delay: 0ms; }
@@ -267,7 +268,8 @@ button[kind^="secondary"]:active { transform: scale(0.97); }
 [data-testid="column"]:nth-child(4) [data-testid="metric-container"] { animation-delay: 120ms; }
 
 @media (prefers-reduced-motion: reduce) {
-    [data-testid="metric-container"], .flashcard, [data-testid="stAlertContainer"], .hero-card {
+    [data-testid="metric-container"], .flashcard, [data-testid="stAlertContainer"], .hero-card,
+    [data-testid="stPlotlyChart"] {
         animation: none !important;
     }
     button[kind^="primary"], button[kind^="secondary"] {
@@ -377,6 +379,16 @@ hr { border-color: var(--line) !important; }
 [data-testid="metric-container"] {
     background: white; border-radius: 10px; padding: 16px 20px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.08); border: 1px solid var(--line);
+}
+/* Plotly charts otherwise render as a bare white rectangle floating directly
+   on the page background — give them the same card frame (border, radius,
+   shadow) as every other surface so they read as part of the same system
+   rather than a bolted-on charting library. The figures themselves are made
+   transparent (see chart theming helper) so this card background shows
+   through uniformly, right up to the plot's own margins. */
+[data-testid="stPlotlyChart"] {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px 14px 2px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
 .flashcard {
     background: var(--card); border: 1px solid var(--line); border-radius: 14px;
@@ -636,6 +648,37 @@ def pill(text, color):
     return f"<span class='pill' style='background:{color}'>{_esc(text)}</span>"
 
 
+_CHART_FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+
+
+def _theme_fig(fig, **layout_kwargs):
+    """Applies the app's palette/type to a Plotly figure so it reads as part
+    of the same system as the surrounding cards, rather than a
+    default-styled charting-library widget dropped onto the page. Figures
+    are made transparent so the `[data-testid="stPlotlyChart"]` card frame
+    (background, border, shadow) shows through instead of the plot drawing
+    its own competing white rectangle."""
+    defaults = dict(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family=_CHART_FONT, color="#3F4C63", size=13),
+        legend=dict(font=dict(color="#3F4C63")),
+        hoverlabel=dict(bgcolor="#14213F", font=dict(color="#FFFFFF", family=_CHART_FONT)),
+        margin=dict(t=10, b=10, l=10, r=10),
+    )
+    defaults.update(layout_kwargs)
+    fig.update_layout(**defaults)
+    fig.update_xaxes(gridcolor="#E1DCCB", zerolinecolor="#E1DCCB", linecolor="#CEC6AE",
+                      title_font=dict(color="#78859C"), tickfont=dict(color="#78859C"))
+    fig.update_yaxes(gridcolor="#E1DCCB", zerolinecolor="#E1DCCB", linecolor="#CEC6AE",
+                      title_font=dict(color="#78859C"), tickfont=dict(color="#78859C"))
+    return fig
+
+
+def _plotly_chart(fig):
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+
+
 def subject_selectbox(label, key=None, include_all=False, default_name=None):
     names = (["All subtests"] if include_all else []) + [s["name"] for s in SUBJECTS]
     idx = 0
@@ -880,9 +923,9 @@ def page_dashboard():
             customdata=df["attempts"],
             hovertemplate="%{x}<br>Accuracy: %{y:.0f}%<br>Attempts: %{customdata}<extra></extra>",
         ))
-        fig.update_layout(yaxis_title="Accuracy (%)", yaxis_range=[0, 110],
-                          height=340, margin=dict(t=10, b=10), plot_bgcolor="white")
-        st.plotly_chart(fig, width="stretch")
+        _theme_fig(fig, yaxis_title="Accuracy (%)", yaxis_range=[0, 110], height=340)
+        fig.update_traces(textfont=dict(color="#3F4C63"))
+        _plotly_chart(fig)
 
         # Readiness — weakest subtests
         ready = df[df["attempts"] > 0].sort_values("accuracy")
@@ -900,9 +943,8 @@ def page_dashboard():
             ts["accuracy"] = ts["correct"] / ts["attempts"] * 100
             fig2 = px.line(ts, x="day", y="attempts", markers=True)
             fig2.update_traces(line_color="#1D3E72")
-            fig2.update_layout(height=280, margin=dict(t=10, b=10), plot_bgcolor="white",
-                               yaxis_title="Questions", xaxis_title="")
-            st.plotly_chart(fig2, width="stretch")
+            _theme_fig(fig2, height=280, yaxis_title="Questions", xaxis_title="")
+            _plotly_chart(fig2)
         else:
             st.caption("No activity recorded in the last 30 days.")
     with colB:
@@ -911,8 +953,10 @@ def page_dashboard():
         if not qc.empty and qc["questions"].sum() > 0:
             fig3 = go.Figure(go.Pie(labels=qc["subject_name"], values=qc["questions"],
                                     marker_colors=qc["color"].tolist(), hole=0.45))
-            fig3.update_layout(height=280, margin=dict(t=10, b=10), showlegend=True)
-            st.plotly_chart(fig3, width="stretch")
+            fig3.update_traces(textfont=dict(color="#FFFFFF"))
+            _theme_fig(fig3, height=320, showlegend=True,
+                       legend=dict(orientation="h", yanchor="top", y=-0.1, x=0, font=dict(color="#3F4C63")))
+            _plotly_chart(fig3)
 
     st.markdown("### Pace — average time per question")
     pace_rows = cached_daily_pace(uid, 30)
@@ -932,10 +976,9 @@ def page_dashboard():
                                    name="Your average", line=dict(color="#1D3E72", width=3)))
         fig4.add_trace(go.Scatter(x=daily["day"], y=daily["target_seconds"], mode="lines",
                                    name="Target (official pacing)", line=dict(color="#BA8F4E", width=2, dash="dash")))
-        fig4.update_layout(height=300, margin=dict(t=10, b=10), plot_bgcolor="white",
-                           yaxis_title="Seconds per question", xaxis_title="",
-                           legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
-        st.plotly_chart(fig4, width="stretch")
+        _theme_fig(fig4, height=300, yaxis_title="Seconds per question", xaxis_title="",
+                   legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0, font=dict(color="#3F4C63")))
+        _plotly_chart(fig4)
 
         latest = daily.iloc[-1]
         gap = latest["avg_seconds"] - latest["target_seconds"]
