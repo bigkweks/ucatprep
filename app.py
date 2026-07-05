@@ -391,27 +391,36 @@ hr { border-color: var(--line) !important; }
     padding: 10px 14px 2px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
 }
 /* Activity calendar — hand-built (not Plotly, which clamps chart width to
-   its container no matter what's requested) so it can genuinely overflow
-   into a horizontal scrollbar on a phone instead of squeezing 53 weeks of
-   cells into 390px and becoming illegible. Weekday labels stay outside the
-   scroll region so they're always visible next to whichever weeks are
-   currently in view. */
-.streak-cal-wrap { display: flex; gap: 6px; align-items: flex-start; background: var(--card);
+   its container no matter what's requested, making a fixed-cell-size grid
+   either overflow awkwardly or squeeze illegibly small). The grid instead
+   stretches to fill its column exactly (via aspect-ratio, so cells stay
+   square) — no fixed pixel sizes, no horizontal scrollbar. Hover shows an
+   instant custom tooltip (not the native `title` delay) with the exact
+   activity count for that day. */
+.streak-cal-wrap { display: flex; gap: 10px; align-items: stretch; background: var(--card);
     border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
-.streak-cal-days { display: flex; flex-direction: column; gap: 3px; padding-top: 18px;
-    flex-shrink: 0; font-family: var(--mono); font-size: 10px; color: var(--ink-faint); }
-.streak-cal-days span { height: 12px; line-height: 12px; }
-.streak-cal-scroll { overflow-x: auto; padding-bottom: 4px; }
-.streak-cal-months { position: relative; height: 16px; white-space: nowrap;
+.streak-cal-days { display: flex; flex-direction: column; justify-content: space-between;
+    padding-top: 20px; flex-shrink: 0; font-family: var(--mono); font-size: 10px; color: var(--ink-faint); }
+.streak-cal-body { flex: 1 1 auto; min-width: 0; }
+.streak-cal-months { position: relative; height: 16px;
     font-family: var(--mono); font-size: 10px; color: var(--ink-faint); }
 .streak-cal-months span { position: absolute; top: 0; }
-.streak-cal-grid { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 12px); gap: 3px; }
-.streak-cal-cell { width: 12px; height: 12px; border-radius: 2px; background: var(--line); }
+.streak-cal-grid { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 1fr); gap: 3px; width: 100%; }
+.streak-cal-cell { position: relative; border-radius: 2px; background: var(--line); }
 .streak-cal-cell.level-1 { background: #D7E2F0; }
 .streak-cal-cell.level-2 { background: #7C9BC4; }
 .streak-cal-cell.level-3 { background: #2C5590; }
 .streak-cal-cell.level-4 { background: #14213F; }
+.streak-cal-cell:hover { outline: 1.5px solid var(--ink); outline-offset: 1px; z-index: 2; }
+.streak-cal-cell::after {
+    content: attr(data-tip); position: absolute; bottom: 100%; left: 50%; z-index: 5;
+    transform: translateX(-50%) translateY(-6px); white-space: nowrap; pointer-events: none;
+    background: var(--ink); color: #fff; font-family: var(--mono); font-size: 11px;
+    padding: 4px 8px; border-radius: 6px; box-shadow: 0 4px 10px rgba(0,0,0,0.18);
+    opacity: 0; transition: opacity .1s ease;
+}
+.streak-cal-cell:hover::after { opacity: 1; }
 /* Dataframes (Leaderboard, Guide reference tables) otherwise render as a
    plain square-cornered grid with no relation to the card system used
    everywhere else. The hover toolbar (search/download/column-visibility) is
@@ -797,10 +806,10 @@ def _activity_calendar_html(uid, weeks=26):
 
     Built as plain HTML/CSS rather than a Plotly figure: Streamlit clamps a
     chart's width to its container no matter what width is requested, so a
-    53-week-wide Plotly figure just gets squeezed down to phone-width
-    (illegible) instead of overflowing into a scrollbar. A hand-built grid
-    isn't subject to that clamp, scrolls horizontally for real on a phone,
-    and gets native-tooltip hover for free via the `title` attribute."""
+    fixed-cell-size Plotly heatmap either gets squeezed illegibly small or
+    needs a scrollbar. This grid stretches to fill its container exactly
+    (cells stay square via aspect-ratio) and shows an instant custom tooltip
+    on hover with the day's exact activity count."""
     counts = db.get_daily_activity_counts(uid, days=weeks * 7 + 7)
     today = date.today()
     start = today - timedelta(days=weeks * 7 - 1)
@@ -839,12 +848,11 @@ def _activity_calendar_html(uid, weeks=26):
     cells_by_week: dict = {}
     for row in df.itertuples():
         n = row.count
-        title = f"{row.day.strftime('%b %-d, %Y')}: {n} {'activity' if n == 1 else 'activities'}"
+        tip = f"{row.day.strftime('%b %-d, %Y')}: {n} {'activity' if n == 1 else 'activities'}"
         cells_by_week.setdefault(row.week, {})[row.weekday] = (
-            f"<div class='streak-cal-cell level-{row.level}' title='{_esc(title)}'></div>"
+            f"<div class='streak-cal-cell level-{row.level}' data-tip='{_esc(tip)}'></div>"
         )
 
-    col_px = 15  # 12px cell + 3px gap, must match .streak-cal-grid CSS
     month_labels = []
     seen_months = set()
     for wk in range(n_weeks):
@@ -852,10 +860,11 @@ def _activity_calendar_html(uid, weeks=26):
         m = first_day.strftime("%Y-%m")
         if m not in seen_months:
             seen_months.add(m)
-            month_labels.append(f"<span style='left:{wk * col_px}px'>{first_day.strftime('%b')}</span>")
+            pct = wk / n_weeks * 100
+            month_labels.append(f"<span style='left:{pct:.2f}%'>{first_day.strftime('%b')}</span>")
 
     grid_cells = "".join(
-        cells_by_week.get(wk, {}).get(wd, "<div class='streak-cal-cell level-0'></div>")
+        cells_by_week.get(wk, {}).get(wd, "<div class='streak-cal-cell level-0' data-tip=''></div>")
         for wk in range(n_weeks) for wd in range(7)
     )
 
@@ -863,9 +872,10 @@ def _activity_calendar_html(uid, weeks=26):
         "<div class='streak-cal-wrap'>"
         "<div class='streak-cal-days'><span>Sun</span><span>Mon</span><span>Tue</span>"
         "<span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>"
-        "<div class='streak-cal-scroll'>"
-        f"<div class='streak-cal-months' style='width:{n_weeks * col_px}px'>{''.join(month_labels)}</div>"
-        f"<div class='streak-cal-grid' style='grid-template-columns: repeat({n_weeks}, 12px)'>{grid_cells}</div>"
+        "<div class='streak-cal-body'>"
+        f"<div class='streak-cal-months'>{''.join(month_labels)}</div>"
+        f"<div class='streak-cal-grid' style='grid-template-columns: repeat({n_weeks}, 1fr); "
+        f"aspect-ratio: {n_weeks} / 7'>{grid_cells}</div>"
         "</div></div>"
     )
 
