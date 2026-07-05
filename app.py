@@ -20,6 +20,7 @@ import time
 import base64
 from pathlib import Path
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 _LOGO_PATH = Path(__file__).parent / "assets" / "logo.png"
 _LOGO_B64 = base64.b64encode(_LOGO_PATH.read_bytes()).decode() if _LOGO_PATH.exists() else ""
@@ -100,8 +101,9 @@ def cached_accuracy_by_subject(uid):
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def cached_daily_activity(uid, days):
-    return db.get_daily_activity_counts(uid, days)
+def cached_daily_activity(uid, days, tz_name=None):
+    tz = ZoneInfo(tz_name) if tz_name else None
+    return db.get_daily_activity_counts(uid, days, tz=tz)
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -648,6 +650,84 @@ def _play_ding():
 _install_click_sound()
 
 
+# ── Timezone detection ──────────────────────────────────────────────────────────
+# The server (and hence date.today()/datetime.now() everywhere in this app)
+# runs in its own timezone, not the student's — so "today" for the activity
+# calendar, day streak, exam countdown, and overdue-task flags could be off
+# by a day for anyone far from the server's zone. Streamlit has no built-in
+# way to read the browser's timezone, and a page reload after login wipes
+# this app's session-only auth (verified: it does), so detection has to
+# happen once, before login, via a query-string round trip rather than
+# anything that touches an authenticated session. The `tz` query param then
+# just rides along in the URL for the rest of the session (Streamlit reruns
+# don't touch the URL) until _check_account resolves a user_id and persists
+# it. A localStorage flag stops this from redirecting again on every future
+# visit once a browser has already reported its zone once.
+#
+# This has to run via st.html(unsafe_allow_javascript=True) rather than the
+# components.html() iframe used for sound effects elsewhere: the redirect
+# needs real top-level navigation, and components.html's iframe is sandboxed
+# without allow-top-navigation, so window.parent.location.replace(...) is
+# silently blocked by the browser from in there (confirmed live — Chrome logs
+# "Unsafe attempt to initiate navigation ... sandboxed"). st.html injects
+# directly into the page itself, no iframe boundary to fight.
+_TZ_DETECT_JS = """
+<script>
+(function () {
+  try {
+    if (localStorage.getItem("ucatify_tz_sent") === "1") return;
+    var params = new URLSearchParams(window.location.search);
+    if (params.has("tz")) {
+      localStorage.setItem("ucatify_tz_sent", "1");
+      return;
+    }
+    var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz) {
+      params.set("tz", tz);
+      localStorage.setItem("ucatify_tz_sent", "1");
+      window.location.replace(window.location.pathname + "?" + params.toString() + window.location.hash);
+    }
+  } catch (e) {}
+})();
+</script>
+"""
+st.html(_TZ_DETECT_JS, unsafe_allow_javascript=True)
+
+
+def _user_tz(uid) -> ZoneInfo | None:
+    name = db.get_context(uid, "tz_name")
+    if not name:
+        return None
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        return None
+
+
+def _user_today(uid) -> date:
+    """Today's date in the signed-in user's own timezone, once known, else
+    the server's — used everywhere a date is compared against user activity
+    (streak, calendar, overdue tasks, exam countdown) instead of bare
+    date.today()."""
+    tz = _user_tz(uid)
+    return datetime.now(tz).date() if tz else date.today()
+
+
+def _capture_user_tz(uid):
+    """Persist the browser-reported timezone (see _TZ_DETECT_JS) against this
+    account the first time it shows up in the URL, so every later session —
+    even ones that never carry the query param — already knows it."""
+    tz_name = st.query_params.get("tz")
+    if not tz_name:
+        return
+    try:
+        ZoneInfo(tz_name)
+    except Exception:
+        return
+    if db.get_context(uid, "tz_name") != tz_name:
+        db.set_context(uid, "tz_name", tz_name)
+
+
 # ── Site gate (optional) + per-account login ───────────────────────────────────
 def _check_site_password() -> bool:
     """Optional shared password that gates the whole app before individual sign-in."""
@@ -747,6 +827,7 @@ def _check_account() -> bool:
 
 _check_site_password()
 _check_account()
+_capture_user_tz(st.session_state["user_id"])
 
 
 def _is_content_admin() -> bool:
@@ -838,8 +919,9 @@ def _activity_calendar_html(uid, weeks=26):
     needs a scrollbar. This grid stretches to fill its container exactly
     (cells stay square via aspect-ratio) and shows an instant custom tooltip
     on hover with the day's exact activity count."""
-    counts = db.get_daily_activity_counts(uid, days=weeks * 7 + 7)
-    today = date.today()
+    tz = _user_tz(uid)
+    counts = db.get_daily_activity_counts(uid, days=weeks * 7 + 7, tz=tz)
+    today = _user_today(uid)
     start = today - timedelta(days=weeks * 7 - 1)
     start -= timedelta(days=(start.weekday() + 1) % 7)  # snap back to the preceding Sunday
 
@@ -973,12 +1055,13 @@ def est_sjt_band(accuracy_pct):
 
 
 def days_to_exam():
-    iso = db.get_context(st.session_state["user_id"], "exam_date")
+    uid = st.session_state["user_id"]
+    iso = db.get_context(uid, "exam_date")
     if not iso:
         return None, None
     try:
         d = date.fromisoformat(iso)
-        return (d - date.today()).days, d
+        return (d - _user_today(uid)).days, d
     except ValueError:
         return None, None
 
@@ -1070,7 +1153,7 @@ def _streak_milestone_html(uid, current):
     is exact regardless of how long ago the last dashboard visit was."""
     if current <= 0:
         return ""
-    run_start = (date.today() - timedelta(days=current - 1)).isoformat()
+    run_start = (_user_today(uid) - timedelta(days=current - 1)).isoformat()
     stored_run_start = db.get_context(uid, "streak_run_start")
     last_celebrated = int(db.get_context(uid, "streak_last_celebrated") or 0)
     if stored_run_start != run_start:
@@ -1159,7 +1242,7 @@ def page_dashboard():
                 db.set_context(uid, "onboarding_dismissed", "1")
                 st.rerun()
 
-    streak = db.get_streak(uid)
+    streak = db.get_streak(uid, tz=_user_tz(uid))
     c0, c1, c2, c3, c4 = st.columns(5)
     c0.metric("Day streak", streak["current"],
               help="Consecutive days you've answered practice questions, sat a mock, or reviewed flashcards")
@@ -1786,7 +1869,7 @@ def page_scheduler():
                      "for a ready-made schedule across every subtest.")
         return
 
-    today = date.today()
+    today = _user_today(uid)
     for t in tasks:
         sub = SUB_BY_ID.get(t["subject_id"])
         overdue = t["due_date"] and t["due_date"] < today.isoformat() and t["status"] != "Done"

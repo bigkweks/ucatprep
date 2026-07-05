@@ -14,7 +14,8 @@ import hmac
 import secrets
 import threading
 import time
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 # ── Backend detection (lazy so env var can be injected before first use) ───────
@@ -1487,13 +1488,27 @@ def get_mock_summary(user_id):
         _close(conn)
 
 
-def get_daily_activity_counts(user_id, days=371):
+def _to_user_date(ts, tz: ZoneInfo | None) -> date:
+    """Which calendar day a stored `created_at`/`last_reviewed` timestamp
+    falls on for the user, not the server. Every timestamp in this app is
+    written with a naive datetime.now() on a server that runs in UTC, so the
+    string is reinterpreted as UTC and converted into the user's own zone
+    before taking its date — otherwise anyone west/east of UTC gets activity
+    silently misfiled onto the wrong day near midnight."""
+    dt = datetime.fromisoformat(str(ts))
+    if tz is not None:
+        dt = dt.replace(tzinfo=timezone.utc).astimezone(tz)
+    return dt.date()
+
+
+def get_daily_activity_counts(user_id, days=371, tz: ZoneInfo | None = None):
     """Per-day counts of practice/mock attempts + flashcard reviews for the
     last `days` days, for the Dashboard's GitHub/Anki-style activity
     calendar. Returns {date: count}; days with no activity are simply
     absent from the dict (the caller fills gaps with 0). Same activity
     definition as get_streak(), so the calendar and the streak always agree
-    on what counts as "did something that day"."""
+    on what counts as "did something that day". `tz` buckets each timestamp
+    into the user's own calendar day instead of the server's."""
     ph = _ph()
     conn = get_conn()
     try:
@@ -1504,13 +1519,14 @@ def get_daily_activity_counts(user_id, days=371):
     finally:
         _close(conn)
 
-    cutoff = date.today() - timedelta(days=days)
+    today = datetime.now(tz).date() if tz else date.today()
+    cutoff = today - timedelta(days=days)
     counts: dict = {}
     for r in rows:
         ts = r["created_at"]
         if not ts:
             continue
-        d = date.fromisoformat(str(ts)[:10])
+        d = _to_user_date(ts, tz)
         if d < cutoff:
             continue
         counts[d] = counts.get(d, 0) + 1
@@ -1644,7 +1660,7 @@ def get_overall_stats(user_id):
         _close(conn)
 
 
-def get_streak(user_id):
+def get_streak(user_id, tz: ZoneInfo | None = None):
     """Current and longest consecutive-day study streaks.
 
     A day counts if the user did at least one practice/mock attempt or
@@ -1652,7 +1668,8 @@ def get_streak(user_id):
     still keeps a streak alive. The current streak stays alive through
     "today" even before today's practice happens (it only actually breaks
     once a full day is skipped), so checking in once a day, any time of day,
-    is enough to keep it going."""
+    is enough to keep it going. `tz` buckets each timestamp into the user's
+    own calendar day instead of the server's."""
     ph = _ph()
     conn = get_conn()
     try:
@@ -1663,11 +1680,11 @@ def get_streak(user_id):
     finally:
         _close(conn)
 
-    dates = {date.fromisoformat(str(r["created_at"])[:10]) for r in rows}
+    dates = {_to_user_date(r["created_at"], tz) for r in rows}
     if not dates:
         return {"current": 0, "longest": 0, "active_today": False}
 
-    today = date.today()
+    today = datetime.now(tz).date() if tz else date.today()
     active_today = today in dates
 
     current = 0
