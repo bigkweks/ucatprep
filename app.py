@@ -763,21 +763,29 @@ def _theme_fig(fig, **layout_kwargs):
         legend=dict(font=dict(color="#3F4C63")),
         hoverlabel=dict(bgcolor="#14213F", font=dict(color="#FFFFFF", family=_CHART_FONT)),
         margin=dict(t=10, b=10, l=10, r=10),
+        # Dashboard charts are read-only glances at your own stats, not
+        # exploration tools — drag-to-zoom and scroll-zoom left users able to
+        # accidentally distort the axes with the modebar (and its "reset
+        # axes" button) already hidden, with no obvious way back except an
+        # undiscoverable double-click. Locking the axes keeps hover tooltips
+        # working while removing that dead end.
+        dragmode=False,
     )
     defaults.update(layout_kwargs)
     fig.update_layout(**defaults)
     fig.update_xaxes(gridcolor="#E1DCCB", zerolinecolor="#E1DCCB", linecolor="#CEC6AE",
-                      title_font=dict(color="#78859C"), tickfont=dict(color="#78859C"))
+                      title_font=dict(color="#78859C"), tickfont=dict(color="#78859C"), fixedrange=True)
     fig.update_yaxes(gridcolor="#E1DCCB", zerolinecolor="#E1DCCB", linecolor="#CEC6AE",
-                      title_font=dict(color="#78859C"), tickfont=dict(color="#78859C"))
+                      title_font=dict(color="#78859C"), tickfont=dict(color="#78859C"), fixedrange=True)
     return fig
 
 
 def _plotly_chart(fig):
-    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+    st.plotly_chart(fig, width="stretch",
+                     config={"displayModeBar": False, "scrollZoom": False, "doubleClick": False})
 
 
-def _activity_calendar_html(uid, weeks=53):
+def _activity_calendar_html(uid, weeks=26):
     """A GitHub/Anki-style activity calendar: one column per week, one row
     per weekday, shaded by how much practice happened that day. Shading is
     bucketed into 5 levels by that user's own quartiles of active days
