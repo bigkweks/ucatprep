@@ -251,14 +251,31 @@ button[kind^="secondary"]:active { transform: scale(0.97); }
 /* Entrance animation — cards and metrics fade/lift in on each rerun instead
    of just snapping into place, so completing an action (submitting a form,
    finishing a mock, revealing a flashcard) feels like a small reward rather
-   than the page silently swapping content out. Kept short (220ms) and only
-   on first paint so it never feels like it's in the way. */
+   than the page silently swapping content out. Ease-out-quint (no bounce)
+   reads as precise rather than playful. Staggered by list position so a row
+   of stat cards reveals left-to-right instead of blinking in as one block. */
 @keyframes fadeSlideIn {
-    from { opacity: 0; transform: translateY(6px); }
+    from { opacity: 0; transform: translateY(8px); }
     to   { opacity: 1; transform: translateY(0); }
 }
-[data-testid="metric-container"], .flashcard, [data-testid="stAlertContainer"] {
-    animation: fadeSlideIn .22s ease-out;
+[data-testid="metric-container"], .flashcard, [data-testid="stAlertContainer"], .hero-card {
+    animation: fadeSlideIn .32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+[data-testid="column"]:nth-child(1) [data-testid="metric-container"] { animation-delay: 0ms; }
+[data-testid="column"]:nth-child(2) [data-testid="metric-container"] { animation-delay: 40ms; }
+[data-testid="column"]:nth-child(3) [data-testid="metric-container"] { animation-delay: 80ms; }
+[data-testid="column"]:nth-child(4) [data-testid="metric-container"] { animation-delay: 120ms; }
+
+@media (prefers-reduced-motion: reduce) {
+    [data-testid="metric-container"], .flashcard, [data-testid="stAlertContainer"], .hero-card {
+        animation: none !important;
+    }
+    button[kind^="primary"], button[kind^="secondary"] {
+        transition: none !important;
+    }
+    button[kind^="primary"]:active, button[kind^="secondary"]:active {
+        transform: none !important;
+    }
 }
 
 /* Tabs */
@@ -633,8 +650,8 @@ with st.sidebar:
 # ── Top navigation ──────────────────────────────────────────────────────────────
 NAV_ITEMS = [
     ("📊 Dashboard", "📊", "Home"),
-    ("🧭 UCAT Guide", "🧭", "Guide"),
     ("📝 Practice Questions", "📝", "Practice"),
+    ("🧭 UCAT Guide", "🧭", "Guide"),
     ("🔁 Mistakes Bank", "🔁", "Fixes"),
     ("⏱️ Mock Exam", "⏱️", "Mock"),
     ("🏆 Leaderboard", "🏆", "Ranks"),
@@ -691,15 +708,18 @@ def page_dashboard():
                 "<div class='hero-sub' style='margin-top:6px'>🎉 Good luck / well done!</div></div>",
                 unsafe_allow_html=True,
             )
-        hcols = st.columns(3)
-        if hcols[0].button("⏱️ Take a mock", width="stretch", key="hero_mock"):
+        # Practice is the one primary action here — visually heavier (wider
+        # column, filled button) than the two secondary shortcuts, so there's
+        # never doubt about what to click first.
+        hcols = st.columns([2, 1, 1])
+        if hcols[0].button("📝 Start practicing", width="stretch", type="primary", key="hero_practice"):
+            ss["nav_page"] = "📝 Practice Questions"
+            st.rerun()
+        if hcols[1].button("⏱️ Take a mock", width="stretch", key="hero_mock"):
             ss["nav_page"] = "⏱️ Mock Exam"
             st.rerun()
-        if hcols[1].button("🧭 Read the Guide", width="stretch", key="hero_guide"):
+        if hcols[2].button("🧭 Read the Guide", width="stretch", key="hero_guide"):
             ss["nav_page"] = "🧭 UCAT Guide"
-            st.rerun()
-        if hcols[2].button("🗓️ Study Scheduler", width="stretch", key="hero_plan"):
-            ss["nav_page"] = "🗓️ Study Scheduler"
             st.rerun()
     else:
         st.markdown(
@@ -716,11 +736,11 @@ def page_dashboard():
     # it doesn't reappear once acted on or explicitly dismissed.
     if stats["attempts"] == 0 and dte is None and not db.get_context(uid, "onboarding_dismissed"):
         with st.container(border=True):
-            st.markdown("#### 👋 New here? Three quick things first")
+            st.markdown("#### 👋 New here? Start with Practice")
             st.markdown(
+                "- **Answer a few practice questions** above — the fastest way to see what the UCAT actually feels like.\n"
                 "- **Set your exam date** above — powers the countdown and the study plan.\n"
-                "- **Sit a short diagnostic mock** to see your starting point across all four subtests.\n"
-                "- **Skim the 🧭 UCAT Guide** — a full playbook, worth 15 minutes before diving into practice."
+                "- **Skim the 🧭 UCAT Guide** when you want the full playbook — useful, but practice comes first."
             )
             if st.button("Dismiss", key="dismiss_onboarding"):
                 db.set_context(uid, "onboarding_dismissed", "1")
