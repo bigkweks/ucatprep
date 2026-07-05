@@ -453,27 +453,41 @@ _CLICK_SOUND_JS = """
         w.__ucatifyAudioCtx = new (w.AudioContext || w.webkitAudioContext)();
       } catch (e) { return null; }
     }
-    if (w.__ucatifyAudioCtx.state === "suspended") {
-      w.__ucatifyAudioCtx.resume();
-    }
     return w.__ucatifyAudioCtx;
   }
   w.__ucatifyGetAudioCtx = getCtx;
 
-  function playClick() {
+  // Browsers auto-suspend an AudioContext after a few seconds of silence to
+  // save power, and resume() is asynchronous — scheduling a sound against a
+  // still-suspended context (whose currentTime is frozen) silently drops it.
+  // Routing every sound through this ensures the context is actually running
+  // before anything gets scheduled, instead of racing resume() and losing the
+  // first click after any pause in activity.
+  function playTone(build) {
     var ctx = getCtx();
     if (!ctx) return;
-    var t = ctx.currentTime;
-    var osc = ctx.createOscillator();
-    var gain = ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(720, t);
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.1, t + 0.004);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start(t);
-    osc.stop(t + 0.06);
+    if (ctx.state === "suspended") {
+      ctx.resume().then(function () { build(ctx); }).catch(function () {});
+    } else {
+      build(ctx);
+    }
+  }
+  w.__ucatifyPlayTone = playTone;
+
+  function playClick() {
+    playTone(function (ctx) {
+      var t = ctx.currentTime;
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(720, t);
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.1, t + 0.004);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.05);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.06);
+    });
   }
 
   if (!w.__ucatifyClickListenerInstalled) {
@@ -491,21 +505,22 @@ _DING_SOUND_JS = """
 <script>
 (function () {
   var w = window.parent;
-  var ctx = w.__ucatifyGetAudioCtx ? w.__ucatifyGetAudioCtx() : null;
-  if (!ctx) return;
-  var t = ctx.currentTime;
-  [660, 880, 1320].forEach(function (freq, i) {
-    var start = t + i * 0.09;
-    var osc = ctx.createOscillator();
-    var gain = ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(freq, start);
-    gain.gain.setValueAtTime(0.0001, start);
-    gain.gain.exponentialRampToValueAtTime(0.16, start + 0.015);
-    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.35);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start(start);
-    osc.stop(start + 0.4);
+  if (!w.__ucatifyPlayTone) return;
+  w.__ucatifyPlayTone(function (ctx) {
+    var t = ctx.currentTime;
+    [660, 880, 1320].forEach(function (freq, i) {
+      var start = t + i * 0.09;
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.16, start + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.35);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + 0.4);
+    });
   });
 })();
 </script>
