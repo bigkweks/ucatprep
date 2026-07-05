@@ -784,12 +784,13 @@ def _check_site_password() -> bool:
 
 
 def _landing_page():
-    """What a signed-out visitor sees before the sign-in form — a value-first
-    pitch with real, live content-size numbers as the hook (not fabricated
-    social-proof counts, which would embarrass a small deployment), so the
-    first thing anyone sees is evidence there's substance here rather than
-    an empty account-creation form. One primary action (start free) plus a
-    lightweight secondary path for anyone who already has an account."""
+    """What a signed-out visitor sees on arrival — a value-first pitch with
+    real, live content-size numbers as the hook (not fabricated social-proof
+    counts, which would embarrass a small deployment). Unlike a typical
+    marketing homepage, the primary action drops the visitor straight into a
+    real quiz with no form to fill in first — account creation is deferred
+    until after they've tried the product, at which point Practice Questions
+    itself asks them to sign up to keep going (see page_practice)."""
     stats = db.get_landing_stats()
     st.markdown(
         "<div class='landing-hero'>"
@@ -820,8 +821,9 @@ def _landing_page():
             unsafe_allow_html=True,
         )
 
-        if st.button("Get started — it's free", type="primary", width="stretch", key="landing_get_started"):
-            st.session_state["_auth_view"] = "signup"
+        if st.button("Try a free quiz — no account needed", type="primary", width="stretch", key="landing_get_started"):
+            st.session_state["_guest_entered"] = True
+            st.session_state["nav_page"] = "Practice Questions"
             st.rerun()
 
         if st.button("Already have an account? Sign in", key="landing_sign_in", width="stretch"):
@@ -830,10 +832,21 @@ def _landing_page():
 
 
 def _check_account() -> bool:
-    """Per-account sign-in/sign-up so each student's progress is tracked separately."""
+    """Per-account sign-in/sign-up so each student's progress is tracked
+    separately — but not a hard gate: a first-time visitor can enter guest
+    mode from the landing page (see _landing_page) and reach Practice
+    Questions / the UCAT Guide with no account at all. This only returns
+    True once a real account exists; the router further down restricts what
+    a guest (no user_id, `_guest_entered` set) is allowed to navigate to."""
     if st.session_state.get("user_id"):
         return True
-    if not st.session_state.get("_auth_view"):
+    if st.session_state.get("_auth_view"):
+        pass  # explicit ask to sign in/up (from the landing page, sidebar,
+              # nav, or the post-quiz continue wall) always wins, even for
+              # someone already in guest mode.
+    elif st.session_state.get("_guest_entered"):
+        return False
+    else:
         _landing_page()
         st.stop()
         return False
@@ -850,6 +863,10 @@ def _check_account() -> bool:
     )
     col = st.columns([1, 2, 1])[1]
     with col:
+        if st.session_state.get("_guest_entered"):
+            if st.button("← Continue browsing as a guest", key="auth_back_to_guest"):
+                st.session_state.pop("_auth_view", None)
+                st.rerun()
         default_tab = "Create account" if st.session_state["_auth_view"] == "signup" else "Sign in"
         tab_login, tab_signup = st.tabs(["Sign in", "Create account"], default=default_tab)
         with tab_login:
@@ -898,7 +915,8 @@ def _check_account() -> bool:
 
 _check_site_password()
 _check_account()
-_capture_user_tz(st.session_state["user_id"])
+if st.session_state.get("user_id"):
+    _capture_user_tz(st.session_state["user_id"])
 
 
 def _is_content_admin() -> bool:
@@ -1146,20 +1164,31 @@ with st.sidebar:
         f"</div>",
         unsafe_allow_html=True,
     )
-    st.caption(f"Signed in as **{st.session_state.get('username', '')}**")
-    if st.button("Log out", width="stretch"):
-        for k in list(st.session_state.keys()):
-            del st.session_state[k]
-        st.rerun()
-    stats = cached_overall_stats(st.session_state["user_id"])
-    acc = (stats["correct"] / stats["attempts"] * 100) if stats["attempts"] else 0
-    st.metric("Overall accuracy", f"{acc:.0f}%", help="Across all answered practice questions")
-    st.metric("Cards due today", stats["cards_due"])
-    dte, exam_d = days_to_exam()
-    if dte is not None:
-        st.metric("Days to exam", dte)
-    st.markdown("---")
-    st.caption("Set an exam date in Manage to enable the countdown.")
+    if st.session_state.get("user_id"):
+        st.caption(f"Signed in as **{st.session_state.get('username', '')}**")
+        if st.button("Log out", width="stretch"):
+            for k in list(st.session_state.keys()):
+                del st.session_state[k]
+            st.rerun()
+        stats = cached_overall_stats(st.session_state["user_id"])
+        acc = (stats["correct"] / stats["attempts"] * 100) if stats["attempts"] else 0
+        st.metric("Overall accuracy", f"{acc:.0f}%", help="Across all answered practice questions")
+        st.metric("Cards due today", stats["cards_due"])
+        dte, exam_d = days_to_exam()
+        if dte is not None:
+            st.metric("Days to exam", dte)
+        st.markdown("---")
+        st.caption("Set an exam date in Manage to enable the countdown.")
+    else:
+        st.caption("Browsing as a guest")
+        if st.button("Create free account", type="primary", width="stretch", key="sidebar_signup"):
+            st.session_state["_auth_view"] = "signup"
+            st.rerun()
+        if st.button("Sign in", width="stretch", key="sidebar_signin"):
+            st.session_state["_auth_view"] = "signin"
+            st.rerun()
+        st.markdown("---")
+        st.caption("Full progress tracking, mock exams, and the AI tutor unlock once you have an account.")
 
 
 # ── Top navigation ──────────────────────────────────────────────────────────────
@@ -1176,16 +1205,31 @@ NAV_ITEMS = [
     ("AI Tutor", "Tutor"),
     ("Manage", "Manage"),
 ]
-st.session_state.setdefault("nav_page", NAV_ITEMS[0][0])
+# Guests (no account yet) only get the two pages they can actually use
+# without one — everything else assumes a real user_id throughout its page
+# function. This is the actual access boundary; _check_account only decides
+# whether the auth form is forced, not which pages are reachable.
+GUEST_PAGES = {"Practice Questions", "UCAT Guide"}
+is_guest = not st.session_state.get("user_id")
+nav_items = [item for item in NAV_ITEMS if item[0] in GUEST_PAGES] if is_guest else NAV_ITEMS
+
+st.session_state.setdefault("nav_page", "Practice Questions" if is_guest else NAV_ITEMS[0][0])
+if is_guest and st.session_state["nav_page"] not in GUEST_PAGES:
+    st.session_state["nav_page"] = "Practice Questions"
 
 with st.container(key="topnav"):
-    cols = st.columns(len(NAV_ITEMS))
-    for col, (full_key, short) in zip(cols, NAV_ITEMS):
+    cols = st.columns(len(nav_items) + (1 if is_guest else 0))
+    for col, (full_key, short) in zip(cols, nav_items):
         active = st.session_state["nav_page"] == full_key
         with col:
             if st.button(short, key=f"nav_btn_{full_key}",
                          type="primary" if active else "secondary", width="stretch"):
                 st.session_state["nav_page"] = full_key
+                st.rerun()
+    if is_guest:
+        with cols[-1]:
+            if st.button("Sign in", key="nav_btn_signin", type="secondary", width="stretch"):
+                st.session_state["_auth_view"] = "signin"
                 st.rerun()
 
 page = st.session_state["nav_page"]
@@ -1606,43 +1650,58 @@ def _render_answer_review(q, chosen):
 def page_practice():
     st.title("Practice Questions")
     ss = st.session_state
+    uid = ss.get("user_id")
+    # A guest gets exactly one quiz; once they've reached the finished screen
+    # below, `_guest_quiz_done` stays set for the rest of the browser session
+    # (mirrored by "quiz"/"quiz_idx" also just staying put, since only signed-in
+    # "New quiz" clears them) so every later visit to this page lands back on
+    # that same finished screen and its account-creation wall rather than a
+    # fresh settings form — this must be the *same* render path/widget keys
+    # every time, not a separate early-return screen, or a click on its
+    # buttons can never be attributed to the right widget on the next rerun.
+    guest_locked = not uid and ss.get("_guest_quiz_done")
 
-    with st.expander("Quiz settings", expanded="quiz" not in ss):
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            sid = subject_selectbox("Subtest", key="quiz_subject", include_all=True)
-        with c2:
-            difficulty = st.selectbox("Difficulty", ["All", "Easy", "Medium", "Hard"], key="quiz_diff")
-        with c3:
-            n = st.number_input("Questions", 1, 50, 5, key="quiz_n")
-        if st.button("Start quiz", type="primary"):
-            pool = cached_questions(subject_id=sid, difficulty=difficulty)
-            # Keep passage sets intact and in order, round-robin across subtests
-            # when mixing so a short quiz reliably samples every subtest's
-            # format, prioritise unseen / least-recently-seen questions so
-            # practice cycles through the bank instead of repeating at random,
-            # and give unresolved mistakes a boost so they come up more often
-            # until answered correctly twice in a row. Then take units until
-            # reaching the requested count (a passage set may nudge the total
-            # slightly over rather than be cut in half).
-            seen_map = cached_last_seen(ss["user_id"])
-            mistake_ids = cached_mistake_ids(ss["user_id"])
-            units = _mixed_unit_order(pool, seen_map, mistake_ids)
-            quiz: list = []
-            for u in units:
-                if len(quiz) >= int(n):
-                    break
-                quiz.extend(u)
-            if not quiz:
-                st.warning("No questions match those filters yet. Add some in Manage.")
-            else:
-                ss["quiz"] = quiz
-                ss["quiz_idx"] = 0
-                ss["quiz_answered"] = {}
-                ss["quiz_correct"] = 0
-                ss["quiz_times"] = {}
-                ss["quiz_start"] = datetime.now().timestamp()
-                st.rerun()
+    if not uid:
+        st.info("You're trying this out without an account — this quiz won't be saved. "
+                 "Create a free account afterwards to track your progress and keep practicing.")
+
+    if not guest_locked:
+        with st.expander("Quiz settings", expanded="quiz" not in ss):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                sid = subject_selectbox("Subtest", key="quiz_subject", include_all=True)
+            with c2:
+                difficulty = st.selectbox("Difficulty", ["All", "Easy", "Medium", "Hard"], key="quiz_diff")
+            with c3:
+                n = st.number_input("Questions", 1, 50, 5, key="quiz_n")
+            if st.button("Start quiz", type="primary"):
+                pool = cached_questions(subject_id=sid, difficulty=difficulty)
+                # Keep passage sets intact and in order, round-robin across subtests
+                # when mixing so a short quiz reliably samples every subtest's
+                # format, prioritise unseen / least-recently-seen questions so
+                # practice cycles through the bank instead of repeating at random,
+                # and give unresolved mistakes a boost so they come up more often
+                # until answered correctly twice in a row. Then take units until
+                # reaching the requested count (a passage set may nudge the total
+                # slightly over rather than be cut in half).
+                seen_map = cached_last_seen(uid) if uid else {}
+                mistake_ids = cached_mistake_ids(uid) if uid else set()
+                units = _mixed_unit_order(pool, seen_map, mistake_ids)
+                quiz: list = []
+                for u in units:
+                    if len(quiz) >= int(n):
+                        break
+                    quiz.extend(u)
+                if not quiz:
+                    st.warning("No questions match those filters yet. Add some in Manage.")
+                else:
+                    ss["quiz"] = quiz
+                    ss["quiz_idx"] = 0
+                    ss["quiz_answered"] = {}
+                    ss["quiz_correct"] = 0
+                    ss["quiz_times"] = {}
+                    ss["quiz_start"] = datetime.now().timestamp()
+                    st.rerun()
 
     if "quiz" not in ss:
         st.info("Configure your quiz above and press **Start quiz**. Every answer is logged so your Dashboard analytics stay current.")
@@ -1666,10 +1725,27 @@ def page_practice():
                        delta=f"{avg_secs - target:+.1f}s vs target", delta_color="inverse")
             c2.metric("Target for this mix", f"{target:.1f}s",
                        help="Official UCAT per-question pacing, blended across the subtests in this quiz")
-        if st.button("New quiz"):
-            for k in ("quiz", "quiz_idx", "quiz_answered", "quiz_correct", "quiz_times"):
-                ss.pop(k, None)
-            st.rerun()
+        if uid:
+            if st.button("New quiz"):
+                for k in ("quiz", "quiz_idx", "quiz_answered", "quiz_correct", "quiz_times"):
+                    ss.pop(k, None)
+                st.rerun()
+        else:
+            ss["_guest_quiz_done"] = True
+            st.divider()
+            st.markdown("### Keep going")
+            st.caption("Create a free account to save this progress, track your accuracy over time, "
+                       "and unlock Mock Exams, Flashcards and the AI Tutor.")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Create a free account to continue", type="primary", width="stretch",
+                             key="guest_continue_signup"):
+                    st.session_state["_auth_view"] = "signup"
+                    st.rerun()
+            with c2:
+                if st.button("Sign in instead", width="stretch", key="guest_continue_signin"):
+                    st.session_state["_auth_view"] = "signin"
+                    st.rerun()
         return
 
     q = quiz[idx]
@@ -1688,8 +1764,9 @@ def page_practice():
             is_correct = _is_correct(q, choice)
             elapsed = datetime.now().timestamp() - ss.get("quiz_start", datetime.now().timestamp())
             elapsed = round(elapsed, 1)
-            db.record_attempt(ss["user_id"], q["id"], q["subject_id"], choice, is_correct, elapsed)
-            _invalidate_stats_cache()
+            if uid:
+                db.record_attempt(uid, q["id"], q["subject_id"], choice, is_correct, elapsed)
+                _invalidate_stats_cache()
             ss["quiz_answered"][idx] = choice
             ss["quiz_times"][idx] = elapsed
             if is_correct:
@@ -3500,4 +3577,6 @@ PAGES = {
     "AI Tutor": page_tutor,
     "Manage": page_manage,
 }
+if is_guest and page not in GUEST_PAGES:
+    page = "Practice Questions"
 PAGES[page]()
