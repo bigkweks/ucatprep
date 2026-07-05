@@ -1184,22 +1184,24 @@ def page_dashboard():
     else:
         st.info("No practice questions answered yet. Head to **Practice Questions** to begin — your analytics will populate here.")
 
-    st.markdown("### Activity calendar")
-    if stats["attempts"] or streak["longest"]:
-        st.markdown(_activity_calendar_html(uid), unsafe_allow_html=True)
-        st.caption("Darker days had more practice, mock, and flashcard activity — shaded relative to your own pace.")
-    else:
-        st.caption("No activity recorded yet. Answer some **Practice Questions** to start filling this in.")
-
-    st.markdown("### Question bank coverage")
-    qc = pd.DataFrame(cached_question_counts())
-    if not qc.empty and qc["questions"].sum() > 0:
-        fig3 = go.Figure(go.Pie(labels=qc["subject_name"], values=qc["questions"],
-                                marker_colors=qc["color"].tolist(), hole=0.45))
-        fig3.update_traces(textfont=dict(color="#FFFFFF"))
-        _theme_fig(fig3, height=320, showlegend=True,
-                   legend=dict(orientation="h", yanchor="top", y=-0.1, x=0, font=dict(color="#3F4C63")))
-        _plotly_chart(fig3)
+    colA, colB = st.columns([3, 2])
+    with colA:
+        st.markdown("### Activity calendar")
+        if stats["attempts"] or streak["longest"]:
+            st.markdown(_activity_calendar_html(uid), unsafe_allow_html=True)
+            st.caption("Darker days had more practice, mock, and flashcard activity — shaded relative to your own pace.")
+        else:
+            st.caption("No activity recorded yet. Answer some **Practice Questions** to start filling this in.")
+    with colB:
+        st.markdown("### Question bank coverage")
+        qc = pd.DataFrame(cached_question_counts())
+        if not qc.empty and qc["questions"].sum() > 0:
+            fig3 = go.Figure(go.Pie(labels=qc["subject_name"], values=qc["questions"],
+                                    marker_colors=qc["color"].tolist(), hole=0.45))
+            fig3.update_traces(textfont=dict(color="#FFFFFF"))
+            _theme_fig(fig3, height=260, showlegend=True,
+                       legend=dict(orientation="h", yanchor="top", y=-0.15, x=0, font=dict(color="#3F4C63")))
+            _plotly_chart(fig3)
 
     st.markdown("### Pace — average time per question")
     pace_rows = cached_daily_pace(uid, 30)
