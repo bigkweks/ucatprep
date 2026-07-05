@@ -579,6 +579,34 @@ _CLICK_SOUND_JS = """
       if (btn) playClick();
     }, true);
   }
+
+  // A soft, quiet blip on each activity-calendar cell — quieter/shorter than
+  // the button click since scrubbing across the grid fires it many times in
+  // quick succession, and a delegated "mouseover" (not "mousemove") means it
+  // fires once per cell entered rather than continuously.
+  function playHover() {
+    playTone(function (ctx) {
+      var t = ctx.currentTime;
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(900, t);
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.045, t + 0.003);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.035);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + 0.04);
+    });
+  }
+
+  if (!w.__ucatifyHoverListenerInstalled) {
+    w.__ucatifyHoverListenerInstalled = true;
+    w.document.addEventListener("mouseover", function (e) {
+      var cell = e.target && e.target.closest && e.target.closest(".streak-cal-cell");
+      if (cell) playHover();
+    }, true);
+  }
 })();
 </script>
 """
