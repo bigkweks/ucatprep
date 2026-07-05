@@ -2337,54 +2337,31 @@ def _tutor_increment_today(uid):
     return count
 
 
-def _tutor_api_key(uid):
-    """Which Anthropic API key (if any) this user's Tutor requests should use,
-    and where it came from.
-
-    Prefers the user's own key (added in Manage → Account) so their usage is
-    billed to them, not to whoever is paying for the shared ANTHROPIC_API_KEY.
-    The shared key is only used as a fallback for the deployment owner/admin
-    (per ADMIN_USERNAMES, same test as the content-editing gate) — everyone
-    else must bring their own key rather than silently drawing on it."""
-    personal = db.get_user_api_key(uid)
-    if personal:
-        return personal, "personal"
-    shared = os.environ.get("ANTHROPIC_API_KEY", "")
-    if shared and _is_content_admin():
-        return shared, "shared"
-    return None, None
+def _tutor_api_key():
+    """The Anthropic API key AI Tutor requests use — the deployment owner's
+    shared ANTHROPIC_API_KEY, if configured. Every signed-in user shares it,
+    capped by a daily per-user message limit (TUTOR_DAILY_LIMIT) to keep the
+    deployment owner's API cost bounded."""
+    return os.environ.get("ANTHROPIC_API_KEY", "")
 
 
 def page_tutor():
     st.title("AI Tutor")
     uid = st.session_state["user_id"]
-    api_key, key_source = _tutor_api_key(uid)
+    api_key = _tutor_api_key()
     if not _HAS_ANTHROPIC:
         st.warning("The AI Tutor needs the `anthropic` package installed. Everything else in the app "
                    "works without it.")
         return
     if not api_key:
-        st.warning(
-            "The AI Tutor needs an Anthropic API key. Add your own personal key in "
-            "Manage → Account to start chatting — your usage will be billed to you, not shared "
-            "with anyone else on this deployment."
-        )
-        if st.button("Go to Manage", type="primary", key="tutor_go_manage"):
-            st.session_state["nav_page"] = "Manage"
-            st.rerun()
+        st.warning("The AI Tutor isn't configured on this deployment — ask whoever runs it to set an "
+                   "Anthropic API key.")
         return
 
-    # The daily quota protects the deployment owner's own spend, so it only
-    # applies when running on their shared key — a personal key is the user's
-    # own money and their own limit to manage.
-    used_today = _tutor_messages_today(uid) if key_source == "shared" else 0
+    used_today = _tutor_messages_today(uid)
     cols = st.columns([4, 1])
-    caption = "Ask anything — concepts, practice problems, study strategy."
-    if key_source == "shared":
-        caption += f" ({used_today}/{TUTOR_DAILY_LIMIT} messages used today)"
-    else:
-        caption += " (using your personal API key)"
-    cols[0].caption(caption)
+    cols[0].caption("Ask anything — concepts, practice problems, study strategy. "
+                     f"({used_today}/{TUTOR_DAILY_LIMIT} messages used today)")
     if cols[1].button("Clear chat"):
         db.clear_chat_history(uid)
         st.rerun()
@@ -2399,10 +2376,9 @@ def page_tutor():
     # rather than making the student retype what they were just reading.
     prefill = st.session_state.pop("tutor_prefill", None)
 
-    if key_source == "shared" and used_today >= TUTOR_DAILY_LIMIT:
+    if used_today >= TUTOR_DAILY_LIMIT:
         st.info(f"You've used all {TUTOR_DAILY_LIMIT} of today's Tutor messages — this keeps API "
-                "costs bounded for whoever is paying for this deployment. It resets tomorrow, or add "
-                "your own API key in Manage → Account for unlimited use.")
+                "costs bounded for whoever is paying for this deployment. It resets tomorrow.")
         return
 
     # max_chars bounds the cost of a single message the same way the daily
@@ -2415,8 +2391,7 @@ def page_tutor():
 
     if prompt:
         db.save_message(uid, "user", prompt)
-        if key_source == "shared":
-            _tutor_increment_today(uid)
+        _tutor_increment_today(uid)
         with st.chat_message("user"):
             st.markdown(prompt)
         with st.chat_message("assistant"):
@@ -2477,29 +2452,6 @@ def page_manage():
                 else:
                     db.set_password(uid, new_pw)
                     st.success("Password updated.")
-
-        st.divider()
-        st.markdown("**AI Tutor — personal API key**")
-        if db.has_user_api_key(uid):
-            st.caption("A personal Anthropic API key is set. Your Tutor conversations are billed to "
-                       "your own key, not shared with anyone else on this deployment.")
-            if st.button("Remove personal API key"):
-                db.clear_user_api_key(uid)
-                st.success("Removed. The Tutor will fall back to the deployment default, if one is configured for you.")
-                st.rerun()
-        else:
-            st.caption("By default the AI Tutor may run on a key the deployment owner pays for. Add your "
-                       "own Anthropic API key (from console.anthropic.com → API Keys) so your Tutor usage "
-                       "is billed to you instead.")
-            with st.form("set_api_key", clear_on_submit=True):
-                key_input = st.text_input("Anthropic API key", type="password", placeholder="sk-ant-...")
-                if st.form_submit_button("Save key", type="primary"):
-                    if not key_input or not key_input.strip().startswith("sk-ant-"):
-                        st.error("That doesn't look like a valid Anthropic API key (should start with 'sk-ant-').")
-                    else:
-                        db.set_user_api_key(uid, key_input.strip())
-                        st.success("Personal API key saved — the Tutor will use it from now on.")
-                        st.rerun()
 
     # Exam date
     with tabs[1]:

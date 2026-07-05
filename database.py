@@ -26,12 +26,6 @@ try:
 except ImportError:
     _HAS_PG = False
 
-try:
-    from cryptography.fernet import Fernet
-    _HAS_CRYPTO = True
-except ImportError:
-    _HAS_CRYPTO = False
-
 import sqlite3
 DB_PATH = Path(__file__).parent / "ucat.db"
 
@@ -245,7 +239,6 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     salt          TEXT NOT NULL,
     hash_iterations INTEGER DEFAULT 100000,
-    anthropic_api_key_enc TEXT,
     created_at    TEXT
 );
 -- Failed-login tracking, keyed by the raw username string typed at the login
@@ -374,11 +367,6 @@ CREATE TABLE IF NOT EXISTS chat_history (
     content    TEXT NOT NULL,
     created_at TEXT
 );
-CREATE TABLE IF NOT EXISTS app_context (
-    key        TEXT PRIMARY KEY,
-    value      TEXT NOT NULL,
-    updated_at TEXT
-);
 CREATE TABLE IF NOT EXISTS user_context (
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     key        TEXT NOT NULL,
@@ -395,7 +383,6 @@ _PG_TABLES = [
         password_hash TEXT NOT NULL,
         salt          TEXT NOT NULL,
         hash_iterations INTEGER DEFAULT 100000,
-        anthropic_api_key_enc TEXT,
         created_at    TEXT
     )""",
     """CREATE TABLE IF NOT EXISTS login_attempts (
@@ -520,11 +507,6 @@ _PG_TABLES = [
         content    TEXT NOT NULL,
         created_at TEXT
     )""",
-    """CREATE TABLE IF NOT EXISTS app_context (
-        key        TEXT PRIMARY KEY,
-        value      TEXT NOT NULL,
-        updated_at TEXT
-    )""",
     """CREATE TABLE IF NOT EXISTS user_context (
         user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         key        TEXT NOT NULL,
@@ -644,20 +626,6 @@ def _migrate_auth_hardening(conn):
         _commit(conn)
 
 
-def _migrate_byok(conn):
-    """Add users.anthropic_api_key_enc for databases created before per-user
-    AI Tutor API keys existed, so existing deployments pick up the column
-    without losing rows. Guarded to be safe to re-run and safe on databases
-    that predate it."""
-    if not _column_exists(conn, "users", "anthropic_api_key_enc"):
-        if _setup():
-            with conn.cursor() as cur:
-                cur.execute("ALTER TABLE users ADD COLUMN anthropic_api_key_enc TEXT")
-        else:
-            conn.execute("ALTER TABLE users ADD COLUMN anthropic_api_key_enc TEXT")
-        _commit(conn)
-
-
 def init_db():
     """Create tables, migrate older schemas, seed starter content on first
     run, and backfill any newer seed content into an already-populated
@@ -680,7 +648,6 @@ def init_db():
         _migrate_question_options(conn)
         _migrate_question_format(conn)
         _migrate_auth_hardening(conn)
-        _migrate_byok(conn)
         _backfill_mistakes_from_history(conn)
     finally:
         _close(conn)
@@ -775,112 +742,6 @@ def set_password(user_id, new_password: str):
         _run(conn, f"UPDATE users SET password_hash = {ph}, salt = {ph}, hash_iterations = {ph} WHERE id = {ph}",
              (_hash_password(new_password, salt), salt, _HASH_ITERATIONS, user_id))
         _commit(conn)
-    finally:
-        _close(conn)
-
-
-# ── App-wide settings (small key/value store, not tied to any one user) ────────
-
-def get_app_setting(key: str, default=None):
-    ph = _ph()
-    conn = get_conn()
-    try:
-        row = _q1(conn, f"SELECT value FROM app_context WHERE key = {ph}", (key,))
-        return row["value"] if row else default
-    finally:
-        _close(conn)
-
-
-def set_app_setting(key: str, value: str):
-    now = datetime.now().isoformat()
-    conn = get_conn()
-    try:
-        if _setup():
-            with conn.cursor() as cur:
-                cur.execute(
-                    "INSERT INTO app_context (key, value, updated_at) VALUES (%s, %s, %s) "
-                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
-                    (key, value, now))
-        else:
-            conn.execute("INSERT OR REPLACE INTO app_context (key, value, updated_at) VALUES (?, ?, ?)",
-                         (key, value, now))
-        _commit(conn)
-    finally:
-        _close(conn)
-
-
-# ── AI Tutor: per-user API keys (BYOK) ──────────────────────────────────────────
-# Lets a user supply their own Anthropic API key so their Tutor usage is billed
-# to their own account rather than draining whatever ANTHROPIC_API_KEY the
-# deployment owner configured for everyone. Encrypted at rest with a key that's
-# generated once and persisted in app_context — so it survives process
-# restarts without requiring the deployment owner to configure yet another
-# secret, while keeping the key out of plaintext in the database.
-
-_FERNET_SETTING_KEY = "byok_encryption_key"
-
-
-def _get_fernet():
-    if not _HAS_CRYPTO:
-        return None
-    key = get_app_setting(_FERNET_SETTING_KEY)
-    if not key:
-        key = Fernet.generate_key().decode()
-        set_app_setting(_FERNET_SETTING_KEY, key)
-    return Fernet(key.encode())
-
-
-def set_user_api_key(user_id, api_key: str):
-    """Encrypt and store a user's personal Anthropic API key."""
-    f = _get_fernet()
-    if f is None:
-        raise RuntimeError("The 'cryptography' package is required to store personal API keys.")
-    enc = f.encrypt(api_key.strip().encode()).decode()
-    ph = _ph()
-    conn = get_conn()
-    try:
-        _run(conn, f"UPDATE users SET anthropic_api_key_enc = {ph} WHERE id = {ph}", (enc, user_id))
-        _commit(conn)
-    finally:
-        _close(conn)
-
-
-def get_user_api_key(user_id):
-    """Return this user's decrypted personal API key, or None if they haven't set one."""
-    ph = _ph()
-    conn = get_conn()
-    try:
-        row = _q1(conn, f"SELECT anthropic_api_key_enc FROM users WHERE id = {ph}", (user_id,))
-        enc = row["anthropic_api_key_enc"] if row else None
-        if not enc:
-            return None
-        f = _get_fernet()
-        if f is None:
-            return None
-        try:
-            return f.decrypt(enc.encode()).decode()
-        except Exception:
-            return None
-    finally:
-        _close(conn)
-
-
-def clear_user_api_key(user_id):
-    ph = _ph()
-    conn = get_conn()
-    try:
-        _run(conn, f"UPDATE users SET anthropic_api_key_enc = NULL WHERE id = {ph}", (user_id,))
-        _commit(conn)
-    finally:
-        _close(conn)
-
-
-def has_user_api_key(user_id) -> bool:
-    ph = _ph()
-    conn = get_conn()
-    try:
-        row = _q1(conn, f"SELECT anthropic_api_key_enc FROM users WHERE id = {ph}", (user_id,))
-        return bool(row and row["anthropic_api_key_enc"])
     finally:
         _close(conn)
 
