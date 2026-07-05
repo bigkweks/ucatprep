@@ -1631,6 +1631,49 @@ def get_overall_stats(user_id):
         _close(conn)
 
 
+def get_streak(user_id):
+    """Current and longest consecutive-day study streaks.
+
+    A day counts if the user did at least one practice/mock attempt or
+    flashcard review on it — switching between the two on different days
+    still keeps a streak alive. The current streak stays alive through
+    "today" even before today's practice happens (it only actually breaks
+    once a full day is skipped), so checking in once a day, any time of day,
+    is enough to keep it going."""
+    ph = _ph()
+    conn = get_conn()
+    try:
+        rows = _q(conn, f"SELECT created_at FROM attempts WHERE user_id = {ph} AND created_at IS NOT NULL",
+                  (user_id,))
+        rows += _q(conn, f"SELECT last_reviewed AS created_at FROM flashcard_progress "
+                          f"WHERE user_id = {ph} AND last_reviewed IS NOT NULL", (user_id,))
+    finally:
+        _close(conn)
+
+    dates = {date.fromisoformat(str(r["created_at"])[:10]) for r in rows}
+    if not dates:
+        return {"current": 0, "longest": 0, "active_today": False}
+
+    today = date.today()
+    active_today = today in dates
+
+    current = 0
+    cursor = today if active_today else today - timedelta(days=1)
+    while cursor in dates:
+        current += 1
+        cursor -= timedelta(days=1)
+
+    longest = 0
+    run = 0
+    prev = None
+    for d in sorted(dates):
+        run = run + 1 if prev is not None and (d - prev).days == 1 else 1
+        longest = max(longest, run)
+        prev = d
+
+    return {"current": current, "longest": longest, "active_today": active_today}
+
+
 # ── Seed content ───────────────────────────────────────────────────────────────
 
 _SUBJECTS = [

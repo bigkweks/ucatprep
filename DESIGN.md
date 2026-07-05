@@ -40,6 +40,7 @@ Per-subject category colors (VR/DM/QR/SJT pills, chart bars) are muted navy/gold
 - `.hero-card`: the Dashboard's single high-contrast metric card (navy gradient), holding the one most important number plus inline quick-action buttons — used once per page, not a repeatable pattern.
 - Buttons: `kind="primary"` = solid `--teal` (navy) background with white text; `kind="secondary"` = outlined, `--ink` text, `--teal` border/text on hover. Both have `:active { transform: scale(0.97) }` press feedback.
 - Entrance motion: `fadeSlideIn` keyframe (fade + 6px translateY, 220ms ease-out) applied to metric containers, the flashcard face, and alert boxes.
+- `.streak-flame-wrap`: the Dashboard's day-streak milestone celebration (`_STREAK_MILESTONES` in `app.py`) — a small flame SVG in `--gold`/`--gold-wash` only (no new "fire" hue), escalating by size/glow/ember-count across three tiers (spark/steady/blaze at 3/7/30+ days) rather than changing color. Renders once, the day a milestone is first reached, not as a persistent badge — the streak number is otherwise just a plain metric tile.
 
 ## Motion Principles
 
