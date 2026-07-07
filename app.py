@@ -913,6 +913,23 @@ def _check_account() -> bool:
     return False
 
 
+@st.dialog("Create an account to continue")
+def _guest_wall():
+    """The single gate a guest ever hits: every nav item and action they
+    don't have access to looks and sits exactly where it does for a signed-in
+    student — clicking it just pops this instead of silently doing nothing
+    or being hidden, so guest mode reads as the real app with one lock on it,
+    not a cut-down demo."""
+    st.write("Create a free account to keep going — save your progress, and unlock Mock Exams, "
+             "Flashcards, the Study Scheduler, and the AI Tutor.")
+    if st.button("Create a free account", type="primary", width="stretch", key="wall_signup"):
+        st.session_state["_auth_view"] = "signup"
+        st.rerun()
+    if st.button("Sign in instead", width="stretch", key="wall_signin"):
+        st.session_state["_auth_view"] = "signin"
+        st.rerun()
+
+
 _check_site_password()
 _check_account()
 if st.session_state.get("user_id"):
@@ -1205,32 +1222,31 @@ NAV_ITEMS = [
     ("AI Tutor", "Tutor"),
     ("Manage", "Manage"),
 ]
-# Guests (no account yet) only get the two pages they can actually use
-# without one — everything else assumes a real user_id throughout its page
-# function. This is the actual access boundary; _check_account only decides
-# whether the auth form is forced, not which pages are reachable.
+# A guest can actually use exactly two pages without an account — everything
+# else assumes a real user_id throughout its page function. But the nav bar
+# itself shows every item to a guest exactly as a signed-in student sees it
+# (same 11 tabs, same labels, same layout); clicking a locked one pops
+# _guest_wall() instead of navigating there, rather than hiding it or
+# shrinking the bar down to a stripped-down "demo" nav.
 GUEST_PAGES = {"Practice Questions", "UCAT Guide"}
 is_guest = not st.session_state.get("user_id")
-nav_items = [item for item in NAV_ITEMS if item[0] in GUEST_PAGES] if is_guest else NAV_ITEMS
 
 st.session_state.setdefault("nav_page", "Practice Questions" if is_guest else NAV_ITEMS[0][0])
 if is_guest and st.session_state["nav_page"] not in GUEST_PAGES:
     st.session_state["nav_page"] = "Practice Questions"
 
 with st.container(key="topnav"):
-    cols = st.columns(len(nav_items) + (1 if is_guest else 0))
-    for col, (full_key, short) in zip(cols, nav_items):
+    cols = st.columns(len(NAV_ITEMS))
+    for col, (full_key, short) in zip(cols, NAV_ITEMS):
         active = st.session_state["nav_page"] == full_key
         with col:
             if st.button(short, key=f"nav_btn_{full_key}",
                          type="primary" if active else "secondary", width="stretch"):
-                st.session_state["nav_page"] = full_key
-                st.rerun()
-    if is_guest:
-        with cols[-1]:
-            if st.button("Sign in", key="nav_btn_signin", type="secondary", width="stretch"):
-                st.session_state["_auth_view"] = "signin"
-                st.rerun()
+                if is_guest and full_key not in GUEST_PAGES:
+                    _guest_wall()
+                else:
+                    st.session_state["nav_page"] = full_key
+                    st.rerun()
 
 page = st.session_state["nav_page"]
 
@@ -1651,30 +1667,29 @@ def page_practice():
     st.title("Practice Questions")
     ss = st.session_state
     uid = ss.get("user_id")
-    # A guest gets exactly one quiz; once they've reached the finished screen
-    # below, `_guest_quiz_done` stays set for the rest of the browser session
-    # (mirrored by "quiz"/"quiz_idx" also just staying put, since only signed-in
-    # "New quiz" clears them) so every later visit to this page lands back on
-    # that same finished screen and its account-creation wall rather than a
-    # fresh settings form — this must be the *same* render path/widget keys
-    # every time, not a separate early-return screen, or a click on its
-    # buttons can never be attributed to the right widget on the next rerun.
+    # A guest gets exactly one quiz. The settings/start/finished UI below is
+    # identical to what a signed-in student sees — same expander, same
+    # buttons, same labels — the only difference is that starting a *second*
+    # quiz pops _guest_wall() instead of actually doing it, so guest mode
+    # reads as the real app with one lock on it, not a cut-down demo.
     guest_locked = not uid and ss.get("_guest_quiz_done")
 
     if not uid:
         st.info("You're trying this out without an account — this quiz won't be saved. "
                  "Create a free account afterwards to track your progress and keep practicing.")
 
-    if not guest_locked:
-        with st.expander("Quiz settings", expanded="quiz" not in ss):
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                sid = subject_selectbox("Subtest", key="quiz_subject", include_all=True)
-            with c2:
-                difficulty = st.selectbox("Difficulty", ["All", "Easy", "Medium", "Hard"], key="quiz_diff")
-            with c3:
-                n = st.number_input("Questions", 1, 50, 5, key="quiz_n")
-            if st.button("Start quiz", type="primary"):
+    with st.expander("Quiz settings", expanded="quiz" not in ss):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            sid = subject_selectbox("Subtest", key="quiz_subject", include_all=True)
+        with c2:
+            difficulty = st.selectbox("Difficulty", ["All", "Easy", "Medium", "Hard"], key="quiz_diff")
+        with c3:
+            n = st.number_input("Questions", 1, 50, 5, key="quiz_n")
+        if st.button("Start quiz", type="primary"):
+            if guest_locked:
+                _guest_wall()
+            else:
                 pool = cached_questions(subject_id=sid, difficulty=difficulty)
                 # Keep passage sets intact and in order, round-robin across subtests
                 # when mixing so a short quiz reliably samples every subtest's
@@ -1725,27 +1740,14 @@ def page_practice():
                        delta=f"{avg_secs - target:+.1f}s vs target", delta_color="inverse")
             c2.metric("Target for this mix", f"{target:.1f}s",
                        help="Official UCAT per-question pacing, blended across the subtests in this quiz")
-        if uid:
-            if st.button("New quiz"):
+        if st.button("New quiz"):
+            if not uid:
+                ss["_guest_quiz_done"] = True
+                _guest_wall()
+            else:
                 for k in ("quiz", "quiz_idx", "quiz_answered", "quiz_correct", "quiz_times"):
                     ss.pop(k, None)
                 st.rerun()
-        else:
-            ss["_guest_quiz_done"] = True
-            st.divider()
-            st.markdown("### Keep going")
-            st.caption("Create a free account to save this progress, track your accuracy over time, "
-                       "and unlock Mock Exams, Flashcards and the AI Tutor.")
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("Create a free account to continue", type="primary", width="stretch",
-                             key="guest_continue_signup"):
-                    st.session_state["_auth_view"] = "signup"
-                    st.rerun()
-            with c2:
-                if st.button("Sign in instead", width="stretch", key="guest_continue_signin"):
-                    st.session_state["_auth_view"] = "signin"
-                    st.rerun()
         return
 
     q = quiz[idx]
