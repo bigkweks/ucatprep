@@ -464,23 +464,314 @@ hr { border-color: var(--line) !important; }
 .auth-hero .eyebrow { font-family: var(--mono); font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color: var(--teal); margin-bottom:6px; }
 .auth-hero p { color: var(--ink-soft); margin-bottom:28px; font-size:14px; }
 
-/* Signed-out landing page — wider than the auth-hero card that follows it
-   (that one stays narrow and task-focused for the actual sign-in/sign-up
-   form), since it needs room for a stat row and feature list. */
-.landing-hero { max-width:640px; margin:48px auto 0; text-align:center; }
-.landing-hero .mark { margin-bottom:8px; display:flex; justify-content:center; }
-.landing-hero .eyebrow { font-family: var(--mono); font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color: var(--teal); margin-bottom:6px; }
-.landing-hero h1 { font-family: var(--serif); margin-bottom:14px; color: var(--ink); }
-.landing-hero .pitch { color: var(--ink-soft); font-size:15px; max-width:480px; margin:0 auto 32px; line-height:1.6; }
-.landing-features { max-width:480px; margin:0 auto 8px; text-align:left; }
-.landing-features li { color: var(--ink-soft); font-size:14px; margin-bottom:10px; padding-left:4px; }
-.landing-features li strong { color: var(--ink); }
-.st-key-landing_get_started { margin-top: 8px; }
+/* Signed-out landing page — restyled as a centered, single-column editorial
+   layout (minimal hairline nav, centered hero, one wide product visual,
+   centered pull-quote, numbered feature list, closing CTA band) rather than
+   the earlier asymmetric split-hero-with-sidebar-blobs treatment. The goal
+   this time is Apple/Stripe-style restraint: one thing at a time, generous
+   whitespace, no decorative background blobs or a peeking mascot animation
+   competing with the copy. Reuses only the existing palette and type tokens.
+
+   Everything lives inside a single st.container(key="landing_wrap") so this
+   one rule actually constrains real, nested DOM content — wrapping a run of
+   independent st.markdown/st.columns calls between an opening/closing <div>
+   in separate st.markdown calls does nothing in Streamlit (each call renders
+   into its own isolated node). */
+.st-key-landing_wrap { max-width:1120px; margin:0 auto; padding:0 20px; position:relative; }
+
+/* Nav — a plain hairline header instead of a boxed navy pill: brand wordmark
+   in the same serif used for the real in-app brand mark (sidebar header),
+   "Sign in" as a quiet text link rather than an outlined button, so the nav
+   recedes and the hero does the talking. */
+.st-key-landing_nav_bar {
+    padding: 22px 0; margin: 0; border-bottom: 1px solid var(--line);
+}
+.landing-nav-brand {
+    display:flex; align-items:center; gap:10px; height:32px;
+    font-family: var(--serif); font-weight:700; font-size:1.2rem; color: var(--ink);
+}
+.st-key-landing_sign_in { max-width:110px; margin-left:auto; }
 .st-key-landing_sign_in button {
-    background: transparent !important; border: none !important; color: var(--ink-faint) !important;
-    font-weight: 500 !important; box-shadow: none !important; margin-top: 2px;
+    background: transparent !important; border: none !important; box-shadow: none !important;
+    color: var(--ink-soft) !important; font-weight: 600 !important; padding:8px 4px !important;
+    transition: color .15s ease !important;
 }
 .st-key-landing_sign_in button:hover { color: var(--teal) !important; }
+
+/* Entrance — only the hero reveals with a quick fade/lift on load; everything
+   below is below the fold on arrival, so a load-time animation on it would
+   never actually be seen and isn't worth the complexity of a scroll trigger. */
+@keyframes landingPopIn {
+    from { opacity:0; transform: translateY(14px) scale(.98); }
+    to   { opacity:1; transform: translateY(0) scale(1); }
+}
+.landing-hero .eyebrow { animation: landingPopIn .5s cubic-bezier(0.22,1,0.36,1) both; }
+.landing-hero h1 { animation: landingPopIn .55s cubic-bezier(0.22,1,0.36,1) .08s both; }
+.landing-hero .pitch { animation: landingPopIn .55s cubic-bezier(0.22,1,0.36,1) .16s both; }
+.st-key-landing_get_started { animation: landingPopIn .55s cubic-bezier(0.22,1,0.36,1) .24s both; }
+.landing-cta-trust { animation: landingPopIn .5s cubic-bezier(0.22,1,0.36,1) .32s both; }
+.landing-visual-wrap { animation: landingPopIn .6s cubic-bezier(0.22,1,0.36,1) .3s both; }
+
+/* Hero — centered, one headline, one CTA, on the plain background. Text
+   sitting directly on top of a photo is a legibility fight no gradient scrim
+   really wins once the image has any business (bookshelves, faces, color) —
+   so the photo gets its own contained space below instead (.landing-photo),
+   never behind text. */
+.landing-hero { position:relative; z-index:1; text-align:center; max-width:700px; margin:0 auto; padding-top:88px; }
+.landing-hero .eyebrow {
+    font-family: var(--mono); font-size:.72rem; letter-spacing:.16em; text-transform:uppercase;
+    color: var(--teal); margin-bottom:22px; display:inline-flex; align-items:center; gap:8px;
+}
+.landing-hero .eyebrow::before { content:""; width:6px; height:6px; border-radius:50%; background: var(--gold); display:inline-block; }
+.landing-hero h1 {
+    font-family: var(--serif) !important; font-weight:600 !important; color: var(--ink); margin:0 0 22px !important;
+    font-size: clamp(2.6rem, 5.6vw, 4.4rem) !important; line-height:1.06 !important; letter-spacing:-.02em !important;
+}
+.landing-hero h1 .accent { color: var(--teal); }
+.landing-hero .pitch { color: var(--ink-soft); font-size:18px; max-width:52ch; margin:0 auto 36px; line-height:1.6; }
+
+/* Hero flanking graphics — original flat-vector illustrations (hand-drawn
+   SVG shapes, not traced from any icon set or photo, so no licensing
+   question at all), built only from the site's existing palette variables
+   so they read as part of this design system rather than a bolted-on stock
+   asset. Left: a tilted stack of books with a graduation cap. Right: a giant
+   pencil, a clock, and a coffee mug — study-desk objects, not a "practicing
+   doctor" scene, matching what UCATify actually is (admissions-exam prep).
+   Purely decorative (hence aria-hidden), so hidden below the width where
+   they'd start crowding the hero text instead of framing it. */
+.landing-hero-media {
+    display:none; position:absolute; top:60px; width:180px; height:420px; z-index:0; pointer-events:none;
+}
+.landing-hero-media.left { left:0; }
+.landing-hero-media.right { right:0; }
+.landing-hero-media svg { width:100%; height:100%; display:block; }
+@media (min-width: 1300px) {
+    .landing-hero-media { display:block; }
+}
+
+/* Load-in, right graphic — slides in as one unit from the right, on the
+   same ease-out-quint curve as the hero text, timed to land right after the
+   hero copy finishes its own entrance. Kept separate from the idle float
+   below (on the inner <svg>) so the two animations don't fight over the
+   same transform. */
+.landing-hero-media.right { animation: heroMediaEnterRight .7s cubic-bezier(0.22,1,0.36,1) .58s both; }
+@keyframes heroMediaEnterRight {
+    from { opacity:0; transform: translate(36px, 12px) scale(.92); }
+    to   { opacity:1; transform: translate(0, 0) scale(1); }
+}
+
+/* Load-in, left graphic — the books stack in one at a time (bottom book
+   first, then the next, then the cap lands on top), rather than the whole
+   illustration just sliding in as one piece. The wrapper itself only
+   fades in immediately so the background wash is there to stack onto;
+   each book/cap keeps its original tilt baked into its own keyframe (CSS
+   transform replaces the old static rotate() attribute entirely once the
+   animation is running, so the two never fight over the same rotation). */
+.landing-hero-media.left { animation: heroMediaFadeIn .2s ease-out both; }
+@keyframes heroMediaFadeIn { from { opacity:0; } to { opacity:1; } }
+.lm-book1 { transform-origin:90px 287px; animation: lmBookDrop1 .5s cubic-bezier(0.22,1,0.36,1) .15s both; }
+.lm-book2 { transform-origin:90px 253px; animation: lmBookDrop2 .5s cubic-bezier(0.22,1,0.36,1) .35s both; }
+.lm-book3 { transform-origin:90px 219px; animation: lmBookDrop3 .5s cubic-bezier(0.22,1,0.36,1) .55s both; }
+.lm-cap   { transform-origin:90px 170px; animation: lmCapDrop   .5s cubic-bezier(0.22,1,0.36,1) .75s both; }
+@keyframes lmBookDrop1 { from { opacity:0; transform: translateY(-70px) rotate(-3deg); } to { opacity:1; transform: translateY(0) rotate(-3deg); } }
+@keyframes lmBookDrop2 { from { opacity:0; transform: translateY(-70px) rotate(2deg); }  to { opacity:1; transform: translateY(0) rotate(2deg); } }
+@keyframes lmBookDrop3 { from { opacity:0; transform: translateY(-70px) rotate(-4deg); } to { opacity:1; transform: translateY(0) rotate(-4deg); } }
+@keyframes lmCapDrop   { from { opacity:0; transform: translateY(-50px) rotate(-4deg); } to { opacity:1; transform: translateY(0) rotate(-4deg); } }
+
+/* Idle motion for the flanking graphics — each piece animates on its own
+   loop/offset (not one synced group) so the whole thing reads as lively
+   clutter rather than a single mechanical cycle. The clock hands actually
+   rotate at (absurdly sped-up) real clock ratios — hour hand exactly 12x
+   slower than the minute hand — as a small joke worth noticing on a second
+   look, in keeping with the "insane" energy asked for here. Starts only
+   once the load-in above has finished (matching delay + duration). */
+.landing-hero-media.left svg { animation: heroMediaFloat 5s ease-in-out 1.4s infinite alternate; }
+.landing-hero-media.right svg { animation: heroMediaFloat 6s ease-in-out 1.28s infinite alternate; }
+@keyframes heroMediaFloat {
+    from { transform: translateY(0); }
+    to   { transform: translateY(-10px); }
+}
+.lm-tassel { animation: lmSwing 3.2s ease-in-out infinite alternate; }
+@keyframes lmSwing {
+    from { transform: rotate(-6deg); }
+    to   { transform: rotate(6deg); }
+}
+.lm-zap, .lm-dot { animation: lmTwinkle 2.4s ease-in-out infinite; }
+@keyframes lmTwinkle {
+    0%, 100% { opacity:1; transform: scale(1); }
+    50%      { opacity:.4; transform: scale(.8); }
+}
+.lm-hand-min { animation: lmSpin 12s linear infinite; }
+.lm-hand-hour { animation: lmSpin 144s linear infinite; }
+@keyframes lmSpin { to { transform: rotate(360deg); } }
+.lm-steam { animation: lmSteam 2.6s ease-in-out infinite; }
+@keyframes lmSteam {
+    0%   { opacity:0; transform: translateY(4px); }
+    30%  { opacity:.8; }
+    100% { opacity:0; transform: translateY(-10px); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .landing-hero-media.left, .landing-hero-media.right, .landing-hero-media svg,
+    .lm-tassel, .lm-zap, .lm-dot, .lm-hand-min, .lm-hand-hour, .lm-steam {
+        animation: none !important; opacity:1 !important; transform:none !important;
+    }
+    /* These four keep their baked-in tilt rather than transform:none, since
+       that tilt is their normal resting pose, not part of the motion. */
+    .lm-book1 { animation:none !important; opacity:1 !important; transform: rotate(-3deg) !important; }
+    .lm-book2 { animation:none !important; opacity:1 !important; transform: rotate(2deg) !important; }
+    .lm-book3 { animation:none !important; opacity:1 !important; transform: rotate(-4deg) !important; }
+    .lm-cap   { animation:none !important; opacity:1 !important; transform: rotate(-4deg) !important; }
+}
+
+.st-key-landing_get_started { max-width:300px; margin:0 auto; }
+.st-key-landing_get_started button {
+    width:100% !important; border-radius: 999px !important; padding: 14px 30px !important; font-size:16px !important;
+    box-shadow: 0 10px 24px rgba(29,62,114,0.22) !important;
+    transition: background .15s ease, transform .12s cubic-bezier(0.22,1,0.36,1), box-shadow .15s ease !important;
+}
+.st-key-landing_get_started button:hover { transform: translateY(-1px); box-shadow: 0 14px 28px rgba(29,62,114,0.28) !important; }
+.st-key-landing_get_started button:active { transform: translateY(0) scale(0.98) !important; }
+
+/* Trust microcopy right under the primary CTA — reassurance lands exactly at
+   the moment of hesitation, not buried further down the page. */
+.landing-cta-trust { font-size:13px; color: var(--ink-faint); margin:16px 0 0; text-align:center; }
+
+/* Hero visual — one wide illustrative "sample" dashboard card (plain CSS/HTML,
+   no image asset), echoing the real Dashboard's hero-card gradient. A small
+   floating chip overlaps its bottom edge for depth, the same overlap trick
+   used on the closing CTA button below, since Streamlit can't nest a real
+   widget inside raw markdown HTML anyway. */
+.landing-visual-wrap { position:relative; z-index:1; margin:72px 0 68px; display:flex; justify-content:center; }
+.landing-visual-inner { position:relative; width:100%; max-width:900px; }
+.landing-visual-card {
+    background: linear-gradient(150deg, var(--ink) 0%, var(--teal) 100%);
+    border-radius: 22px; padding: 40px 44px; color:#fff;
+    box-shadow: 0 24px 56px rgba(20,33,63,0.28);
+    display:grid; grid-template-columns: 1.1fr 1fr; gap:40px; align-items:center;
+}
+.landing-visual-card .lp-eyebrow { font-family: var(--mono); font-size:.66rem; letter-spacing:.1em; text-transform:uppercase; color: rgba(255,255,255,0.6); }
+.landing-visual-card .lp-number { font-family: var(--serif); font-weight:700; font-size:3rem; color:#fff; margin-top:8px; line-height:1; }
+.landing-visual-card .lp-number span { font-family: var(--sans); font-weight:500; font-size:1.1rem; color: rgba(255,255,255,0.55); margin-left:4px; }
+.landing-visual-card .lp-bar { height:6px; border-radius:4px; background: rgba(255,255,255,0.16); margin-top:18px; overflow:hidden; }
+.landing-visual-card .lp-bar-fill { height:100%; border-radius:4px; background: var(--gold); }
+.landing-visual-card .lp-subjects { display:grid; grid-template-columns:1fr 1fr; gap:14px 18px; }
+.landing-visual-card .lp-sub { display:flex; align-items:center; gap:8px; font-size:13.5px; color: rgba(255,255,255,0.82); }
+.landing-visual-card .lp-sub strong { margin-left:auto; font-family: var(--mono); font-variant-numeric: tabular-nums; color:#fff; }
+.landing-visual-card .lp-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+.landing-visual-chip {
+    position:absolute; left:44px; bottom:-22px; background: var(--card); border:1px solid var(--line);
+    border-radius:999px; padding:12px 22px; box-shadow: 0 10px 26px rgba(20,33,63,0.16);
+    display:flex; align-items:center; gap:10px;
+}
+.landing-visual-chip .lp-task-label { font-size:12.5px; color: var(--ink-soft); }
+.landing-visual-chip .lp-task-value { font-family: var(--mono); font-size:12.5px; font-weight:600; color: var(--teal); }
+@media (max-width: 760px) {
+    .landing-visual-card { grid-template-columns:1fr; padding:32px 26px; }
+    .landing-visual-chip { left:26px; }
+}
+
+/* Stats strip — a plain-spec-sheet row of real, live numbers divided by
+   hairlines (not cards), reading as fact rather than decoration. */
+.landing-stats-strip {
+    display:grid; grid-template-columns: repeat(4, 1fr);
+    border-top:1px solid var(--line); border-bottom:1px solid var(--line);
+    padding:32px 0; margin:0 0 100px;
+}
+.landing-stats-strip .stat { text-align:center; padding:0 12px; border-right:1px solid var(--line); }
+.landing-stats-strip .stat:last-child { border-right:none; }
+.landing-stats-strip .stat strong {
+    display:block; font-family: var(--serif); font-size:1.9rem; color: var(--ink);
+    font-variant-numeric: tabular-nums; line-height:1.1;
+}
+.landing-stats-strip .stat span {
+    display:block; font-family: var(--mono); font-size:.64rem; letter-spacing:.06em; text-transform:uppercase;
+    color: var(--ink-faint); margin-top:6px;
+}
+@media (max-width: 700px) {
+    .landing-stats-strip { grid-template-columns: repeat(2, 1fr); row-gap:24px; }
+    .landing-stats-strip .stat:nth-child(2) { border-right:none; }
+    .landing-stats-strip .stat:nth-child(1), .landing-stats-strip .stat:nth-child(2) { padding-bottom:20px; border-bottom:1px solid var(--line); }
+}
+
+/* Social proof — one large centered pull-quote (a real, concrete quote: a
+   named score jump) in the Stripe/Apple customer-quote style, followed by a
+   thin row of short supporting fragments pulled verbatim from other real
+   quotes rather than a boxed three-card carousel-with-dots. */
+.landing-proof { position:relative; z-index:1; max-width:760px; margin:0 auto 100px; text-align:center; }
+.landing-proof-head {
+    font-family: var(--mono); font-size:.72rem; letter-spacing:.14em; text-transform:uppercase;
+    color: var(--ink-faint); margin-bottom:32px;
+}
+.landing-proof-quote {
+    font-family: var(--serif); font-size: clamp(1.35rem, 2.6vw, 1.85rem); line-height:1.5;
+    color: var(--ink); margin:0 0 20px; font-weight:600;
+}
+.landing-proof-name { font-family: var(--mono); font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; color: var(--ink-faint); }
+.landing-proof-fragments {
+    display:grid; grid-template-columns: repeat(3, 1fr); gap:0; margin-top:56px;
+}
+.landing-proof-fragment { padding:0 26px; border-left:1px solid var(--line); }
+.landing-proof-fragment:first-child { border-left:none; }
+.landing-proof-fragment p { font-size:13.5px; color: var(--ink-soft); line-height:1.55; margin:0 0 10px; font-style:italic; }
+.landing-proof-fragment span { font-family: var(--mono); font-size:.64rem; letter-spacing:.06em; text-transform:uppercase; color: var(--ink-faint); }
+@media (max-width: 700px) {
+    .landing-proof-fragments { grid-template-columns:1fr; gap:24px; }
+    .landing-proof-fragment { border-left:none; padding:0; }
+}
+
+/* Feature list — a numbered spec-sheet list (own row, own heading, generous
+   padding) instead of small icon cards in a grid, so each feature gets full
+   attention on its own rather than competing for space in a 2x2 block. */
+.landing-features { margin:0 0 100px; }
+.landing-features-head {
+    font-family: var(--mono); font-size:.72rem; letter-spacing:.14em; text-transform:uppercase;
+    color: var(--ink-faint); margin-bottom:8px; text-align:center;
+}
+.landing-feature-row {
+    display:flex; gap:32px; padding:36px 0; border-top:1px solid var(--line);
+}
+.landing-features .landing-feature-row:last-child { border-bottom:1px solid var(--line); }
+.landing-feature-num {
+    flex-shrink:0; width:40px; padding-top:6px;
+    font-family: var(--mono); font-size:.8rem; color: var(--gold); letter-spacing:.04em;
+}
+.landing-feature-row h3 { font-family: var(--serif); font-size:1.5rem; color: var(--ink); margin:0 0 10px; font-weight:600; }
+.landing-feature-row p { font-size:15px; color: var(--ink-soft); line-height:1.6; margin:0; max-width:62ch; }
+@media (max-width: 600px) {
+    .landing-feature-row { gap:18px; padding:28px 0; }
+    .landing-feature-row h3 { font-size:1.25rem; }
+}
+
+/* Closing CTA band — full-width navy band, same "chrome" color as the
+   sidebar/top-nav/hero-card elsewhere. The real button renders just below it
+   and is pulled up into the band's reserved bottom padding via negative
+   margin, since Streamlit can't nest a real widget inside raw markdown HTML. */
+.landing-cta-band {
+    background: var(--ink); border-radius:24px; margin:0;
+    padding:80px 40px 108px; text-align:center; position:relative; overflow:hidden;
+}
+.landing-cta-band h2 { position:relative; font-family: var(--serif); color:#fff; font-size: clamp(1.8rem, 3.6vw, 2.6rem); margin:0 0 14px; font-weight:600; }
+.landing-cta-band p { position:relative; color: rgba(255,255,255,0.68); font-size:15.5px; margin:0 auto; max-width:46ch; }
+.st-key-landing_get_started_bottom {
+    max-width:280px; margin:-58px auto 0; position:relative; z-index:2;
+}
+.st-key-landing_get_started_bottom button {
+    border-radius:999px !important; background:#fff !important; color: var(--ink) !important;
+    border:1px solid #fff !important; padding:14px 30px !important; font-size:16px !important;
+    transition: transform .12s cubic-bezier(0.22,1,0.36,1), box-shadow .15s ease !important;
+}
+.st-key-landing_get_started_bottom button:hover { background:#fff !important; transform:translateY(-1px); box-shadow: 0 10px 24px rgba(0,0,0,0.28) !important; }
+.st-key-landing_get_started_bottom button:active { transform: translateY(0) scale(0.98) !important; }
+
+@media (prefers-reduced-motion: reduce) {
+    .st-key-landing_get_started button, .st-key-landing_get_started_bottom button {
+        transition: none !important;
+    }
+    .landing-hero .eyebrow, .landing-hero h1, .landing-hero .pitch,
+    .st-key-landing_get_started, .landing-cta-trust, .landing-visual-wrap {
+        animation: none !important; opacity:1 !important; transform:none !important;
+    }
+}
 
 /* Day streak milestone celebration — a quiet flame accent that only appears
    the day a streak milestone (3, 7, 14, 30...) is first reached, not a
@@ -783,52 +1074,216 @@ def _check_site_password() -> bool:
     return False
 
 
+def _enter_guest():
+    st.session_state["_guest_entered"] = True
+    st.session_state["nav_page"] = "Practice Questions"
+    st.rerun()
+
+
 def _landing_page():
     """What a signed-out visitor sees on arrival — a value-first pitch with
     real, live content-size numbers as the hook (not fabricated social-proof
-    counts, which would embarrass a small deployment). Unlike a typical
-    marketing homepage, the primary action drops the visitor straight into a
-    real quiz with no form to fill in first — account creation is deferred
-    until after they've tried the product, at which point Practice Questions
-    itself asks them to sign up to keep going (see page_practice)."""
+    counts, which would embarrass a small deployment) and real quotes from
+    actual students (not invented ones — a fabricated testimonial on a real
+    site is deceptive, not just bad copy). Unlike a typical marketing
+    homepage, the primary action drops the visitor straight into a real quiz
+    with no form to fill in first — account creation is deferred until after
+    they've tried the product, at which point Practice Questions itself asks
+    them to sign up to keep going (see page_practice).
+
+    Laid out as a centered, single-column editorial page (hairline nav,
+    centered hero, one wide product visual, centered pull-quote, numbered
+    feature list, closing CTA band) rather than the earlier split-hero layout
+    — see the .landing-* rules in the injected stylesheet."""
     stats = db.get_landing_stats()
+
+    # This page pretends to be a full custom site with its own header, so the
+    # default Streamlit toolbar and its reserved top padding (both normally
+    # kept for the hamburger/deploy menu) just show up as a dead gap above
+    # the real nav bar. Scoped to this function only — every other page keeps
+    # the standard Streamlit chrome untouched.
     st.markdown(
-        "<div class='landing-hero'>"
-        f"<div class='mark'>{_logo_img(64)}</div>"
-        "<div class='eyebrow'>UCATify</div>"
-        "<h1>Score in the top decile.</h1>"
-        "<p class='pitch'>A UCAT prep tool built around your own performance data — practice "
-        "questions, timed mocks paced to the real exam, spaced-repetition flashcards, and an AI "
-        "tutor that already knows where you're weak.</p>"
-        "</div>",
+        "<style>"
+        "[data-testid='stHeader'] { display:none; }"
+        "[data-testid='stMainBlockContainer'], .block-container { padding-top:0 !important; }"
+        "</style>",
         unsafe_allow_html=True,
     )
-    col = st.columns([1, 3, 1])[1]
-    with col:
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Questions", f"{stats['questions']:,}")
-        m2.metric("Flashcards", f"{stats['flashcards']:,}")
-        m3.metric("Subtests", stats["subjects"])
-        m4.metric("Mock length", "111 min", help="Paced to the real UCAT format")
+
+    with st.container(key="landing_wrap"):
+        with st.container(key="landing_nav_bar"):
+            nav_l, nav_r = st.columns([4, 1])
+            with nav_l:
+                st.markdown(f"<div class='landing-nav-brand'>{_logo_img(26)}UCATify</div>", unsafe_allow_html=True)
+            with nav_r:
+                if st.button("Sign in", key="landing_sign_in", width="stretch"):
+                    st.session_state["_auth_view"] = "signin"
+                    st.rerun()
 
         st.markdown(
-            "<ul class='landing-features'>"
-            "<li><strong>Practice bank</strong> across all four UCAT subtests, filterable by difficulty.</li>"
-            "<li><strong>Timed mocks</strong> at official per-question pacing, not a generic countdown.</li>"
-            "<li><strong>Flashcards</strong> that come back sooner the more you get them wrong.</li>"
-            "<li><strong>An AI tutor</strong> grounded in your real accuracy and pace, not generic advice.</li>"
-            "</ul>",
+            "<div class='landing-hero-media left'>"
+            "<svg viewBox='0 0 180 420' xmlns='http://www.w3.org/2000/svg' aria-hidden='true'>"
+            "<circle cx='90' cy='230' r='140' fill='var(--teal-wash)'/>"
+            "<rect class='lm-book1' x='30' y='270' width='120' height='34' rx='8' fill='var(--teal)'/>"
+            "<rect class='lm-book2' x='38' y='236' width='104' height='34' rx='8' fill='var(--coral)'/>"
+            "<rect class='lm-book3' x='34' y='202' width='112' height='34' rx='8' fill='var(--gold)'/>"
+            "<g class='lm-cap'>"
+            "<polygon points='90,140 138,163 90,186 42,163' fill='var(--ink)'/>"
+            "<circle cx='90' cy='163' r='5' fill='var(--gold)'/>"
+            "<g class='lm-tassel' style='transform-origin:90px 163px'>"
+            "<line x1='90' y1='163' x2='112' y2='198' stroke='var(--gold)' stroke-width='3' stroke-linecap='round'/>"
+            "<circle cx='112' cy='202' r='6' fill='var(--gold)'/>"
+            "</g>"
+            "</g>"
+            "<path class='lm-zap' d='M148 82 l6 8 -6 8 6 8 -6 8' fill='none' stroke='var(--coral)' stroke-width='4' "
+            "stroke-linecap='round' stroke-linejoin='round'/>"
+            "<circle class='lm-dot' style='animation-delay:0s' cx='28' cy='90' r='7' fill='var(--gold)'/>"
+            "<circle class='lm-dot' style='animation-delay:.6s' cx='150' cy='330' r='6' fill='var(--coral)'/>"
+            "<circle class='lm-dot' style='animation-delay:1.2s' cx='24' cy='340' r='5' fill='var(--teal)'/>"
+            "</svg>"
+            "</div>"
+            "<div class='landing-hero-media right'>"
+            "<svg viewBox='0 0 180 420' xmlns='http://www.w3.org/2000/svg' aria-hidden='true'>"
+            "<circle cx='90' cy='210' r='140' fill='var(--gold-wash)'/>"
+            "<g transform='rotate(20 90 170)'>"
+            "<rect x='75' y='40' width='30' height='200' rx='6' fill='var(--coral)'/>"
+            "<rect x='75' y='18' width='30' height='24' fill='var(--gold)'/>"
+            "<rect x='75' y='6' width='30' height='14' rx='6' fill='#F3E1C9'/>"
+            "<polygon points='75,240 105,240 90,268' fill='#F3E1C9'/>"
+            "<polygon points='83,268 97,268 90,282' fill='var(--ink)'/>"
+            "</g>"
+            "<circle cx='55' cy='325' r='32' fill='var(--card)' stroke='var(--ink)' stroke-width='5'/>"
+            "<line class='lm-hand-min' style='transform-origin:55px 325px' x1='55' y1='325' x2='55' y2='305' "
+            "stroke='var(--ink)' stroke-width='4' stroke-linecap='round'/>"
+            "<line class='lm-hand-hour' style='transform-origin:55px 325px' x1='55' y1='325' x2='70' y2='325' "
+            "stroke='var(--ink)' stroke-width='4' stroke-linecap='round'/>"
+            "<circle cx='55' cy='325' r='3.5' fill='var(--ink)'/>"
+            "<rect x='112' y='86' width='34' height='28' rx='4' fill='var(--card)' stroke='var(--ink)' stroke-width='3'/>"
+            "<ellipse cx='129' cy='86' rx='17' ry='5' fill='var(--ink)'/>"
+            "<path d='M146 94 q14 0 14 8 q0 8 -14 8' fill='none' stroke='var(--ink)' stroke-width='4'/>"
+            "<path class='lm-steam' style='animation-delay:0s' d='M118 74 q-5 -10 4 -17 q8 -6 2 -16' "
+            "stroke='var(--ink-faint)' stroke-width='3' fill='none' stroke-linecap='round'/>"
+            "<path class='lm-steam' style='animation-delay:.9s' d='M134 74 q-5 -10 4 -17 q8 -6 2 -16' "
+            "stroke='var(--ink-faint)' stroke-width='3' fill='none' stroke-linecap='round'/>"
+            "<circle class='lm-dot' style='animation-delay:.3s' cx='150' cy='170' r='6' fill='var(--gold)'/>"
+            "<circle class='lm-dot' style='animation-delay:.9s' cx='26' cy='210' r='5' fill='var(--coral)'/>"
+            "<circle class='lm-dot' style='animation-delay:1.5s' cx='140' cy='360' r='6' fill='var(--teal)'/>"
+            "</svg>"
+            "</div>"
+            "<div class='landing-hero'>"
+            "<div class='eyebrow'>Free UCAT preparation</div>"
+            "<h1>Score in the<br><span class='accent'>top decile.</span></h1>"
+            "<p class='pitch'>A UCAT prep tool built around your own performance data — "
+            "practice questions, timed mocks paced to the real exam, spaced-repetition "
+            "flashcards, and an AI tutor that already knows where you're weak.</p>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("Try a free quiz — no account needed", type="primary", key="landing_get_started"):
+            _enter_guest()
+        st.markdown(
+            "<p class='landing-cta-trust'>Free to start — no account, no card, no catch.</p>",
             unsafe_allow_html=True,
         )
 
-        if st.button("Try a free quiz — no account needed", type="primary", width="stretch", key="landing_get_started"):
-            st.session_state["_guest_entered"] = True
-            st.session_state["nav_page"] = "Practice Questions"
-            st.rerun()
+        st.markdown(
+            "<div class='landing-visual-wrap'><div class='landing-visual-inner'>"
+            "<div class='landing-visual-card'>"
+            "<div>"
+            "<div class='lp-eyebrow'>Sample dashboard</div>"
+            "<div class='lp-number'>2470<span>/ 2700</span></div>"
+            "<div class='lp-bar'><div class='lp-bar-fill' style='width:78%'></div></div>"
+            "</div>"
+            "<div class='lp-subjects'>"
+            "<div class='lp-sub'><span class='lp-dot' style='background:#7C9BC4'></span>Verbal <strong>642</strong></div>"
+            "<div class='lp-sub'><span class='lp-dot' style='background:#BA8F4E'></span>Decision <strong>615</strong></div>"
+            "<div class='lp-sub'><span class='lp-dot' style='background:#2C5590'></span>Quant <strong>598</strong></div>"
+            "<div class='lp-sub'><span class='lp-dot' style='background:#14213F'></span>SJT <strong>Band 1</strong></div>"
+            "</div>"
+            "</div>"
+            "<div class='landing-visual-chip'>"
+            "<span class='lp-task-label'>Flashcards due today</span>"
+            "<span class='lp-task-value'>12</span>"
+            "</div>"
+            "</div></div>",
+            unsafe_allow_html=True,
+        )
 
-        if st.button("Already have an account? Sign in", key="landing_sign_in", width="stretch"):
-            st.session_state["_auth_view"] = "signin"
-            st.rerun()
+        st.markdown(
+            "<div class='landing-stats-strip'>"
+            f"<div class='stat'><strong>{stats['questions']:,}</strong><span>Questions</span></div>"
+            f"<div class='stat'><strong>{stats['flashcards']:,}</strong><span>Flashcards</span></div>"
+            f"<div class='stat'><strong>{stats['subjects']}</strong><span>Subtests</span></div>"
+            "<div class='stat'><strong>111</strong><span>Min, real pacing</span></div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
+            "<div class='landing-proof'>"
+            "<div class='landing-proof-head'>From students who've used it</div>"
+            "<p class='landing-proof-quote'>&ldquo;Found UCATify around six weeks before my exam, "
+            "after paying for another platform I barely used. Ended up doing most of my practice "
+            "here instead. My mock scores went from around 2450 to 2890 by test day. The "
+            "explanations were the reason I stuck with it.&rdquo;</p>"
+            "<div class='landing-proof-name'>Aisha</div>"
+            "<div class='landing-proof-fragments'>"
+            "<div class='landing-proof-fragment'>"
+            "<p>&ldquo;The best free UCAT resource I came across.&rdquo;</p>"
+            "<span>Ben, Manchester</span>"
+            "</div>"
+            "<div class='landing-proof-fragment'>"
+            "<p>&ldquo;My scores in that section improved way quicker than I expected.&rdquo;</p>"
+            "<span>Hannah</span>"
+            "</div>"
+            "<div class='landing-proof-fragment'>"
+            "<p>&ldquo;That made it a lot easier to stay consistent.&rdquo;</p>"
+            "<span>Zoe</span>"
+            "</div>"
+            "</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
+            "<div class='landing-features'>"
+            "<div class='landing-features-head'>Built for the exam, not for engagement</div>"
+            "<div class='landing-feature-row'>"
+            "<div class='landing-feature-num'>01</div>"
+            "<div><h3>Practice bank</h3>"
+            "<p>All four UCAT subtests, filterable by subtest and difficulty, with an explanation "
+            "the moment you answer.</p></div>"
+            "</div>"
+            "<div class='landing-feature-row'>"
+            "<div class='landing-feature-num'>02</div>"
+            "<div><h3>Timed mocks</h3>"
+            "<p>Full and partial exams paced to official per-question timing, not a generic "
+            "countdown clock.</p></div>"
+            "</div>"
+            "<div class='landing-feature-row'>"
+            "<div class='landing-feature-num'>03</div>"
+            "<div><h3>Spaced-repetition flashcards</h3>"
+            "<p>Cards you miss come back sooner, cards you know well drift further out — the SM-2 "
+            "algorithm, not a fixed schedule.</p></div>"
+            "</div>"
+            "<div class='landing-feature-row'>"
+            "<div class='landing-feature-num'>04</div>"
+            "<div><h3>AI tutor</h3>"
+            "<p>Grounded in your real accuracy and pace by subtest, not generic exam advice.</p></div>"
+            "</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
+            "<div class='landing-cta-band'>"
+            "<h2>Start with a real question, not a form.</h2>"
+            "<p>Try a free quiz with no account. Sign up later if you want your progress saved.</p>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        if st.button("Try a free quiz →", type="primary", key="landing_get_started_bottom", width="stretch"):
+            _enter_guest()
 
 
 def _check_account() -> bool:
