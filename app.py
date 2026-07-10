@@ -13,6 +13,7 @@ gate access.
 """
 
 import os
+import json
 import random
 import hmac
 import html
@@ -90,6 +91,11 @@ def cached_flashcard_bank():
     return db.get_flashcard_bank()
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def cached_schools():
+    return db.get_schools()
+
+
 @st.cache_data(ttl=60, show_spinner=False)
 def cached_overall_stats(uid):
     return db.get_overall_stats(uid)
@@ -157,6 +163,7 @@ def _invalidate_content_cache():
     cached_question_counts.clear()
     cached_topics.clear()
     cached_flashcard_bank.clear()
+    cached_schools.clear()
 
 
 def _invalidate_stats_cache():
@@ -1670,6 +1677,7 @@ NAV_ITEMS = [
     ("UCAT Guide", "Guide"),
     ("Mistakes Bank", "Fixes"),
     ("Mock Exam", "Mock"),
+    ("Uni Matcher", "Unis"),
     ("Leaderboard", "Ranks"),
     ("Flashcards", "Cards"),
     ("Study Scheduler", "Plan"),
@@ -3389,7 +3397,7 @@ def page_manage():
     st.title("Manage")
     uid = st.session_state["user_id"]
     is_admin = _is_content_admin()
-    tabs = st.tabs(["Account", "Exam date", "Questions", "Flashcards", "Topics"])
+    tabs = st.tabs(["Account", "Exam date", "Questions", "Flashcards", "Topics", "Schools"])
 
     # Account
     with tabs[0]:
@@ -3674,6 +3682,121 @@ def page_manage():
                         _invalidate_content_cache()
                         st.rerun()
 
+    # Schools (Uni Matcher data)
+    _SCHOOL_USAGE_TYPES = ["threshold", "ranking", "weighted", "sjt_band_only", "not_verified"]
+    with tabs[5]:
+        st.caption(
+            "Powers the Uni Matcher page. Every entry should trace back to a real source (ideally the "
+            "university's own admissions page) — leave a figure out rather than guess it, since students "
+            "use this to inform real application decisions."
+        )
+        if not is_admin:
+            st.info("Adding, editing and deleting verified school records is limited to admins on this "
+                     "deployment. You can still browse the list below.")
+        else:
+            with st.form("add_school", clear_on_submit=True):
+                st.markdown("**Add a school record**")
+                name = st.text_input("University / school name")
+                c = st.columns(2)
+                course = c[0].selectbox("Course", ["Medicine", "Dentistry"], key="ms_course")
+                country = c[1].text_input("Country (optional)", key="ms_country")
+                usage_type = st.selectbox("How UCAT is used", _SCHOOL_USAGE_TYPES, key="ms_usage")
+                c2 = st.columns(3)
+                cutoff_score = c2[0].number_input("Cutoff score (optional, out of 2700)", 0, 2700, 0, 10,
+                                                    key="ms_cutoff")
+                sjt_band_cutoff = c2[1].selectbox("SJT band rejected at (optional)",
+                                                   ["", "Band 2", "Band 3", "Band 4"], key="ms_sjt")
+                weighting_pct = c2[2].number_input("UCAT weighting % (optional)", 0.0, 100.0, 0.0, 5.0,
+                                                     key="ms_weight")
+                detail = st.text_area("Detail (what's actually published, in plain terms)", key="ms_detail")
+                c3 = st.columns(2)
+                source_url = c3[0].text_input("Source URL", key="ms_source")
+                cycle_year = c3[1].text_input("Cycle year (e.g. 2027 entry)", key="ms_cycle")
+                if st.form_submit_button("Add school", type="primary"):
+                    if name and source_url:
+                        db.upsert_school({
+                            "name": name, "course": course, "country": country or None,
+                            "usage_type": usage_type,
+                            "cutoff_score": int(cutoff_score) or None,
+                            "sjt_band_cutoff": sjt_band_cutoff or None,
+                            "weighting_pct": weighting_pct or None,
+                            "detail": detail or None, "source_url": source_url,
+                            "cycle_year": cycle_year or None,
+                        })
+                        _invalidate_content_cache()
+                        st.success("School added.")
+                        st.rerun()
+                    else:
+                        st.warning("Give it a name and a source URL — every entry needs to be traceable.")
+        st.divider()
+        schools_all = cached_schools()
+        st.caption(f"{len(schools_all)} schools")
+        for s in schools_all:
+            with st.expander(f"[{s['course']}] {s['name']}"):
+                edit_key = f"edits_{s['id']}"
+                if not is_admin:
+                    st.caption(s.get("detail") or "")
+                elif st.session_state.get(edit_key):
+                    with st.form(f"editform_s_{s['id']}"):
+                        name_e = st.text_input("University / school name", value=s["name"], key=f"es_name_{s['id']}")
+                        ce = st.columns(2)
+                        course_e = ce[0].selectbox("Course", ["Medicine", "Dentistry"],
+                                                    index=["Medicine", "Dentistry"].index(s["course"]),
+                                                    key=f"es_course_{s['id']}")
+                        country_e = ce[1].text_input("Country (optional)", value=s.get("country") or "",
+                                                      key=f"es_country_{s['id']}")
+                        usage_e = st.selectbox("How UCAT is used", _SCHOOL_USAGE_TYPES,
+                                                index=_SCHOOL_USAGE_TYPES.index(s["usage_type"]),
+                                                key=f"es_usage_{s['id']}")
+                        ce2 = st.columns(3)
+                        cutoff_e = ce2[0].number_input("Cutoff score (optional, out of 2700)", 0, 2700,
+                                                        s.get("cutoff_score") or 0, 10, key=f"es_cutoff_{s['id']}")
+                        sjt_opts = ["", "Band 2", "Band 3", "Band 4"]
+                        sjt_e = ce2[1].selectbox("SJT band rejected at (optional)", sjt_opts,
+                                                  index=sjt_opts.index(s.get("sjt_band_cutoff") or ""),
+                                                  key=f"es_sjt_{s['id']}")
+                        weight_e = ce2[2].number_input("UCAT weighting % (optional)", 0.0, 100.0,
+                                                        s.get("weighting_pct") or 0.0, 5.0, key=f"es_weight_{s['id']}")
+                        detail_e = st.text_area("Detail", value=s.get("detail") or "", key=f"es_detail_{s['id']}")
+                        ce3 = st.columns(2)
+                        source_e = ce3[0].text_input("Source URL", value=s.get("source_url") or "",
+                                                      key=f"es_source_{s['id']}")
+                        cycle_e = ce3[1].text_input("Cycle year", value=s.get("cycle_year") or "",
+                                                     key=f"es_cycle_{s['id']}")
+                        fsc1, fsc2 = st.columns(2)
+                        if fsc1.form_submit_button("Save changes", type="primary"):
+                            if name_e and source_e:
+                                db.upsert_school({
+                                    "id": s["id"], "name": name_e, "course": course_e, "country": country_e or None,
+                                    "usage_type": usage_e, "cutoff_score": int(cutoff_e) or None,
+                                    "sjt_band_cutoff": sjt_e or None, "weighting_pct": weight_e or None,
+                                    "detail": detail_e or None, "source_url": source_e,
+                                    "cycle_year": cycle_e or None,
+                                })
+                                _invalidate_content_cache()
+                                st.session_state[edit_key] = False
+                                st.success("Saved.")
+                                st.rerun()
+                            else:
+                                st.warning("Give it a name and a source URL.")
+                        if fsc2.form_submit_button("Cancel"):
+                            st.session_state[edit_key] = False
+                            st.rerun()
+                else:
+                    st.caption(s.get("detail") or "")
+                    meta = [m for m in (s.get("cycle_year"), s.get("source_url"),
+                                        f"verified {s['last_verified']}" if s.get("last_verified") else None) if m]
+                    if meta:
+                        st.caption(" · ".join(meta))
+                    bs1, bs2 = st.columns(2)
+                    if bs1.button("Edit", key=f"editbtn_s_{s['id']}"):
+                        st.session_state[edit_key] = True
+                        st.rerun()
+                    if bs2.button("Delete", key=f"dels_{s['id']}"):
+                        db.delete_school(s["id"])
+                        _invalidate_content_cache()
+                        st.rerun()
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # MOCK EXAM (timed)
@@ -3707,8 +3830,38 @@ def _mock_subtest_ranges(quiz):
     return ranges
 
 
+_MOCK_PROGRESS_KEY = "mock_progress"
+
+
+def _mock_snapshot(ss):
+    """Serialize the in-progress mock so it survives a closed tab or a fresh
+    login. Stores question ids rather than full question content (which can
+    change in Manage) plus enough timing state to freeze the clock exactly
+    where it was left, the same way the Pause button does."""
+    now = datetime.now().timestamp()
+    paused = ss.get("mock_paused", False)
+    elapsed = ss["mock_elapsed_accum"] if paused else ss["mock_elapsed_accum"] + (now - ss["mock_segment_start"])
+    return {
+        "question_ids": [q["id"] for q in ss["mock"]],
+        "answers": {str(i): v for i, v in ss["mock_answers"].items()},
+        "times": {str(i): v for i, v in ss["mock_times"].items()},
+        "idx": ss["mock_idx"],
+        "budget": ss["mock_budget"],
+        "elapsed": elapsed,
+    }
+
+
+def _save_mock_progress(ss):
+    db.set_context(ss["user_id"], _MOCK_PROGRESS_KEY, json.dumps(_mock_snapshot(ss)))
+
+
+def _clear_mock_progress(ss):
+    db.clear_context(ss["user_id"], _MOCK_PROGRESS_KEY)
+
+
 def _finish_mock(ss, elapsed):
     """Record every answered question to analytics once, then flip to the results screen."""
+    _clear_mock_progress(ss)
     if not ss.get("mock_graded"):
         times = ss.get("mock_times", {})
         batch = []
@@ -3818,6 +3971,43 @@ def page_mock():
 
     # ── Setup screen ──────────────────────────────────────────────────────────
     if "mock" not in ss:
+        saved_raw = db.get_context(ss["user_id"], _MOCK_PROGRESS_KEY)
+        if saved_raw:
+            snap, quiz = None, []
+            try:
+                snap = json.loads(saved_raw)
+                qbyid = {q["id"]: q for q in cached_questions()}
+                quiz = [qbyid[i] for i in snap["question_ids"] if i in qbyid]
+            except Exception:
+                snap = None
+            # Only offer to resume if every question from that mock still
+            # exists — a partial reconstruction would misalign the saved
+            # per-index answers/times against the wrong questions.
+            if snap and quiz and len(quiz) == len(snap["question_ids"]):
+                answered = sum(1 for v in snap["answers"].values() if v is not None)
+                remaining = max(0, snap["budget"] - snap["elapsed"])
+                st.info(f"**Mock in progress** — {answered}/{len(quiz)} answered · "
+                        f"{fmt_mmss(remaining)} remaining.")
+                st.caption("Pick up where you left off, or discard it and start a new mock.")
+                rc1, rc2 = st.columns(2)
+                if rc1.button("Resume mock", type="primary"):
+                    ss["mock"] = quiz
+                    ss["mock_idx"] = max(0, min(snap["idx"], len(quiz) - 1))
+                    ss["mock_answers"] = {int(k): v for k, v in snap["answers"].items()}
+                    ss["mock_times"] = {int(k): v for k, v in snap["times"].items()}
+                    ss["mock_q_start"] = {}
+                    ss["mock_budget"] = snap["budget"]
+                    ss["mock_elapsed_accum"] = snap["elapsed"]
+                    ss["mock_paused"] = True
+                    ss["mock_paused_since"] = datetime.now().timestamp()
+                    st.rerun()
+                if rc2.button("Discard it, start fresh"):
+                    _clear_mock_progress(ss)
+                    st.rerun()
+                return
+            else:
+                _clear_mock_progress(ss)
+
         st.markdown("Sit a timed, UCAT-paced mock using your question bank. Each subtest is "
                     "timed at the real per-question rate, so the clock pressure mirrors the exam.")
         st.caption("Official pacing — VR 44Q/21m · DM 35Q/37m · QR 36Q/26m · SJT 69Q/26m. "
@@ -3859,6 +4049,7 @@ def page_mock():
             ss["mock_elapsed_accum"] = 0.0
             ss["mock_segment_start"] = datetime.now().timestamp()
             ss["mock_paused"] = False
+            _save_mock_progress(ss)
             st.rerun()
         return
 
@@ -3894,6 +4085,7 @@ def page_mock():
                 ss["mock_q_start"][k] += pause_duration
             ss["mock_segment_start"] = datetime.now().timestamp()
             ss["mock_paused"] = False
+            _save_mock_progress(ss)
             st.rerun()
         return
 
@@ -3923,6 +4115,7 @@ def page_mock():
             ss["mock_elapsed_accum"] = elapsed
             ss["mock_paused_since"] = datetime.now().timestamp()
             ss["mock_paused"] = True
+            _save_mock_progress(ss)
             st.rerun()
 
     # Subtest navigator — jump straight to any subtest's first question,
@@ -3939,6 +4132,7 @@ def page_mock():
                 if st.button(f"{sub['name']} ({answered}/{end - start})", key=f"mockjump_{sid}",
                              type="primary" if active else "secondary", width="stretch"):
                     ss["mock_idx"] = start
+                    _save_mock_progress(ss)
                     st.rerun()
 
     q = quiz[idx]
@@ -3955,14 +4149,17 @@ def page_mock():
     nav = st.columns([1, 1, 1, 3])
     if nav[0].button("◀ Back", disabled=idx == 0):
         ss["mock_idx"] -= 1
+        _save_mock_progress(ss)
         st.rerun()
     if nav[1].button("Skip ▶"):
         ss["mock_idx"] += 1
+        _save_mock_progress(ss)
         st.rerun()
     if nav[2].button("Save & next ▶", type="primary"):
         ss["mock_answers"][idx] = choice
         ss["mock_times"][idx] = round(datetime.now().timestamp() - ss["mock_q_start"].get(idx, datetime.now().timestamp()), 1)
         ss["mock_idx"] += 1
+        _save_mock_progress(ss)
         st.rerun()
     if nav[3].button("Finish & grade"):
         if choice:
@@ -4020,6 +4217,136 @@ def page_leaderboard():
         _render_leaderboard(cached_leaderboard_mock_scores(), uid, lambda v: f"{int(round(v))} / 2700")
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# UNI MATCHER — verified UCAT usage/thresholds by UK medical & dental school
+# ════════════════════════════════════════════════════════════════════════════
+_SJT_BAND_RANK = {"Band 1": 1, "Band 2": 2, "Band 3": 3, "Band 4": 4}
+
+_USAGE_BADGE = {
+    "threshold": ("THRESHOLD", "#8A3D3D"),
+    "ranking": ("RANKING", "#1D3E72"),
+    "weighted": ("WEIGHTED", "#3A6B58"),
+    "sjt_band_only": ("SJT BAND", "#5B4B7A"),
+    "not_verified": ("UNCONFIRMED", "#6B6B6B"),
+}
+
+
+def _school_tier(school, cog_total, sjt_band):
+    """Returns (tier_key, tier_label) for a school given a student's indicative
+    cognitive total and SJT band. tier_key controls grouping/sort order."""
+    usage = school["usage_type"]
+    band_rank = _SJT_BAND_RANK.get(sjt_band)
+    cutoff_band_rank = _SJT_BAND_RANK.get(school.get("sjt_band_cutoff") or "")
+    band_fails = bool(band_rank and cutoff_band_rank and band_rank >= cutoff_band_rank)
+
+    if usage == "weighted":
+        return "weighted", "Weighted — no fixed cutoff"
+    if usage == "not_verified":
+        return "unverified", "Not enough verified data"
+    if usage == "sjt_band_only":
+        return ("below", "Below the published SJT bar") if band_fails else ("clears", "Clears the published bar")
+    # threshold / ranking: needs both the score and (if stated) the SJT band to clear
+    score_fails = school.get("cutoff_score") is not None and cog_total < school["cutoff_score"]
+    if score_fails or band_fails:
+        return "below", "Below the published bar"
+    return "clears", "Clears the published bar"
+
+
+def page_schools():
+    st.title("Uni Matcher")
+    st.caption(
+        "Where a UCAT score has historically stood against UK medical and dental schools' own published "
+        "admissions criteria — sourced from each university's stated policy, not an estimate."
+    )
+    st.warning(
+        "Every figure below is the most recently published number we could verify against a real source "
+        "(see the link on each card) — **not** a live lookup against this year's actual requirements, and "
+        "not an offer prediction. Thresholds move a little every cycle, many schools rank or weight rather "
+        "than use a hard cutoff, and a UCAT score is only one part of any application. Always check a "
+        "school's current entry requirements directly before relying on this.",
+        icon="⚠️",
+    )
+
+    uid = st.session_state.get("user_id")
+    default_score, default_band = 1880, "Band 2"
+    if uid:
+        rows = cached_accuracy_by_subject(uid)
+        df = pd.DataFrame(rows)
+        if not df.empty:
+            df["code"] = df["subject_id"].map(lambda sid: SUB_BY_ID.get(sid, {}).get("code", ""))
+            cog = df[df["code"].isin(COGNITIVE_CODES)]
+            if cog["attempts"].sum() > 0:
+                total = 0
+                for _, r in cog.iterrows():
+                    acc = (r["correct"] / r["attempts"] * 100) if r["attempts"] else 0
+                    total += est_scaled_score(acc) if r["attempts"] else 300
+                default_score = total
+            sjt = df[~df["code"].isin(COGNITIVE_CODES)]
+            if sjt["attempts"].sum() > 0:
+                r = sjt.iloc[0]
+                acc = (r["correct"] / r["attempts"] * 100) if r["attempts"] else 0
+                default_band = est_sjt_band(acc)
+
+    with st.container(border=True):
+        c1, c2, c3 = st.columns([2, 1, 1])
+        cog_total = c1.number_input("Your cognitive total (VR + DM + QR, out of 2700)",
+                                     900, 2700, default_score, 10, key="matcher_score")
+        sjt_band = c2.selectbox("Your SJT band", ["Band 1", "Band 2", "Band 3", "Band 4"],
+                                 index=["Band 1", "Band 2", "Band 3", "Band 4"].index(default_band),
+                                 key="matcher_band")
+        courses = c3.multiselect("Course", ["Medicine", "Dentistry"], default=["Medicine", "Dentistry"],
+                                  key="matcher_course")
+        if uid:
+            st.caption("Prefilled from your Dashboard estimate — change either field to explore other scores.")
+        pct = _score_percentile(cog_total)
+        st.caption(f"~{pct}th percentile against a recent UCAT cohort (see the decile table in the UCAT Guide).")
+
+    schools = [s for s in cached_schools() if s["course"] in courses]
+    if not schools:
+        st.info("No verified school data is loaded for this filter yet. Check back after the next data refresh, "
+                "or add entries in Manage.")
+        return
+
+    grouped = {"clears": [], "weighted": [], "below": [], "unverified": []}
+    for s in schools:
+        key, label = _school_tier(s, cog_total, sjt_band)
+        grouped[key].append((s, label))
+
+    section_order = [
+        ("clears", "Clears the published bar"),
+        ("weighted", "Weighted — no fixed cutoff"),
+        ("below", "Below the published bar"),
+        ("unverified", "Not enough verified data"),
+    ]
+    for key, heading in section_order:
+        items = grouped[key]
+        if not items:
+            continue
+        st.markdown(f"### {heading}")
+        for s, _label in sorted(items, key=lambda t: t[0]["name"]):
+            badge_label, badge_color = _USAGE_BADGE.get(s["usage_type"], ("", "#6B6B6B"))
+            with st.container(border=True):
+                bc1, bc2 = st.columns([1, 6])
+                bc1.markdown(
+                    f"<span style='font-family:var(--mono);font-size:.62rem;letter-spacing:.08em;font-weight:700;"
+                    f"color:#fff;background:{badge_color};padding:.2rem .45rem;border-radius:5px;"
+                    f"white-space:nowrap'>{badge_label}</span>", unsafe_allow_html=True,
+                )
+                with bc2:
+                    st.markdown(f"**{s['name']}** — {s['course']}")
+                    if s.get("detail"):
+                        st.caption(s["detail"])
+                    meta = []
+                    if s.get("cycle_year"):
+                        meta.append(s["cycle_year"])
+                    if s.get("last_verified"):
+                        meta.append(f"last verified {s['last_verified']}")
+                    if s.get("source_url"):
+                        meta.append(f"[source]({s['source_url']})")
+                    if meta:
+                        st.caption(" · ".join(meta))
+
+
 # ── Router ────────────────────────────────────────────────────────────────────
 PAGES = {
     "Dashboard": page_dashboard,
@@ -4027,6 +4354,7 @@ PAGES = {
     "Practice Questions": page_practice,
     "Mistakes Bank": page_mistakes,
     "Mock Exam": page_mock,
+    "Uni Matcher": page_schools,
     "Leaderboard": page_leaderboard,
     "Flashcards": page_flashcards,
     "Study Scheduler": page_scheduler,

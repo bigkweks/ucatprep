@@ -375,6 +375,21 @@ CREATE TABLE IF NOT EXISTS user_context (
     updated_at TEXT,
     PRIMARY KEY (user_id, key)
 );
+CREATE TABLE IF NOT EXISTS schools (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT NOT NULL,
+    course        TEXT NOT NULL CHECK(course IN ('Medicine','Dentistry')),
+    country       TEXT,
+    usage_type    TEXT NOT NULL CHECK(usage_type IN ('threshold','ranking','weighted','sjt_band_only','not_verified')),
+    cutoff_score  INTEGER,
+    sjt_band_cutoff TEXT,
+    weighting_pct REAL,
+    detail        TEXT,
+    source_url    TEXT,
+    cycle_year    TEXT,
+    last_verified TEXT,
+    UNIQUE(name, course)
+);
 """
 
 _PG_TABLES = [
@@ -514,6 +529,21 @@ _PG_TABLES = [
         value      TEXT NOT NULL,
         updated_at TEXT,
         PRIMARY KEY (user_id, key)
+    )""",
+    """CREATE TABLE IF NOT EXISTS schools (
+        id            SERIAL PRIMARY KEY,
+        name          TEXT NOT NULL,
+        course        TEXT NOT NULL CHECK(course IN ('Medicine','Dentistry')),
+        country       TEXT,
+        usage_type    TEXT NOT NULL CHECK(usage_type IN ('threshold','ranking','weighted','sjt_band_only','not_verified')),
+        cutoff_score  INTEGER,
+        sjt_band_cutoff TEXT,
+        weighting_pct DOUBLE PRECISION,
+        detail        TEXT,
+        source_url    TEXT,
+        cycle_year    TEXT,
+        last_verified TEXT,
+        UNIQUE(name, course)
     )""",
 ]
 
@@ -865,6 +895,61 @@ def delete_topic(topic_id):
     conn = get_conn()
     try:
         _run(conn, f"DELETE FROM topics WHERE id = {ph}", (topic_id,))
+        _commit(conn)
+    finally:
+        _close(conn)
+
+
+# ── Schools (verified UCAT admissions data) ────────────────────────────────────
+
+def get_schools():
+    conn = get_conn()
+    try:
+        return _q(conn, "SELECT * FROM schools ORDER BY name, course")
+    finally:
+        _close(conn)
+
+
+def upsert_school(data: dict):
+    """Insert or update a school record. Updates by id if given, otherwise by
+    the natural (name, course) key so a re-run of the yearly data refresh
+    updates an existing row in place instead of duplicating it."""
+    data = dict(data)
+    for key in ("country", "cutoff_score", "sjt_band_cutoff", "weighting_pct",
+                "detail", "source_url", "cycle_year"):
+        data.setdefault(key, None)
+    data.setdefault("last_verified", date.today().isoformat())
+    conn = get_conn()
+    try:
+        if not data.get("id"):
+            existing = _q1(conn, _n("SELECT id FROM schools WHERE name=:name AND course=:course"), data)
+            if existing:
+                data["id"] = existing["id"]
+        if data.get("id"):
+            _run(conn, _n("""
+                UPDATE schools SET name=:name, course=:course, country=:country, usage_type=:usage_type,
+                    cutoff_score=:cutoff_score, sjt_band_cutoff=:sjt_band_cutoff, weighting_pct=:weighting_pct,
+                    detail=:detail, source_url=:source_url, cycle_year=:cycle_year, last_verified=:last_verified
+                WHERE id=:id
+            """), data)
+        else:
+            data["id"] = _run(conn, _n("""
+                INSERT INTO schools (name, course, country, usage_type, cutoff_score, sjt_band_cutoff,
+                    weighting_pct, detail, source_url, cycle_year, last_verified)
+                VALUES (:name, :course, :country, :usage_type, :cutoff_score, :sjt_band_cutoff,
+                    :weighting_pct, :detail, :source_url, :cycle_year, :last_verified)
+            """), data)
+        _commit(conn)
+        return data["id"]
+    finally:
+        _close(conn)
+
+
+def delete_school(school_id):
+    ph = _ph()
+    conn = get_conn()
+    try:
+        _run(conn, f"DELETE FROM schools WHERE id = {ph}", (school_id,))
         _commit(conn)
     finally:
         _close(conn)
@@ -1469,6 +1554,16 @@ def get_context(user_id, key: str, default=None):
     try:
         row = _q1(conn, f"SELECT value FROM user_context WHERE user_id = {ph} AND key = {ph}", (user_id, key))
         return row["value"] if row else default
+    finally:
+        _close(conn)
+
+
+def clear_context(user_id, key: str):
+    ph = _ph()
+    conn = get_conn()
+    try:
+        _run(conn, f"DELETE FROM user_context WHERE user_id = {ph} AND key = {ph}", (user_id, key))
+        _commit(conn)
     finally:
         _close(conn)
 
@@ -3450,6 +3545,117 @@ _FLASHCARDS = [
 ]
 
 
+# Verified UK medical/dental school UCAT usage data. Each tuple is:
+# (name, course, country, usage_type, cutoff_score, sjt_band_cutoff, weighting_pct,
+#  detail, source_url, cycle_year)
+# usage_type is one of: 'threshold', 'ranking', 'weighted', 'sjt_band_only', 'not_verified'.
+# Only add a row here once its number is confirmed against a real, citable source
+# (ideally the university's own admissions page) — an unverifiable figure should
+# be left out entirely rather than estimated, since this data drives a tool
+# students use to make real application decisions. Re-running the yearly refresh
+# (see sync_schools()) updates a row in place when (name, course) already exists,
+# so bumping a figure and cycle_year here is enough to correct or refresh it.
+_SCHOOLS = [
+    ("University of Sheffield", "Medicine", "England", "threshold", 1800, None, None,
+     "Applicants below 1800/2700 don't progress; the threshold is set each year as the 40th centile of "
+     "scores from the three most recent UCAT sittings (2024-2026 for this cycle). Above it, applicants "
+     "are ranked by UCAT score for interview.",
+     "https://www.sheffield.ac.uk/smph/undergraduate/medicine-admissions", "2027 entry"),
+    ("Queen Mary University of London", "Medicine", "England", "threshold", None, "Band 4", None,
+     "Rejected outright if UCAT falls below the 4th decile for that year's cohort, or SJT is Band 4. Above "
+     "that bar, UCAT feeds into a weighted score (with UCAS tariff / degree performance) to rank for interview.",
+     "https://www.qmul.ac.uk/media/qmul/docs/admissions/Admissions-Policy-for-UG-MBBS-2026.pdf", "2026 entry"),
+    ("Keele University", "Medicine", "England", "threshold", 1700, "Band 4", None,
+     "Home applicants below 1,700/2700 total or SJT Band 4 are rejected automatically. International "
+     "applicants face a higher bar (1,950, SJT Bands 1-3) and are ranked by UCAT score. Selection beyond "
+     "the cutoff also weighs the personal statement.",
+     "https://www.keele.ac.uk/study/undergraduate/undergraduatecourses/medicine/medicineentryrequirements/", None),
+    ("University of Edinburgh", "Medicine", "Scotland", "threshold", 1850, "Band 4", None,
+     "Minimum UCAT total cut-off of 1850/2700 for 2027 entry; SJT Band 4 is not considered. Above the "
+     "cut-off, scores are ranked and divided into deciles alongside SJT band and academic performance "
+     "for shortlisting.",
+     "https://medicine-vet-medicine.ed.ac.uk/edinburgh-medical-school/medicine/applying/how-to-apply/requirements/ucat",
+     "2027 entry"),
+    ("University of Manchester", "Medicine", "England", "ranking", None, "Band 3", None,
+     "No fixed minimum published in advance — Manchester calculates its threshold each year after UCAT "
+     "results are released in November, based on that year's cohort. SJT Band 3 or 4 is not considered. "
+     "When oversubscribed, ranks by UCAT total score and SJT band.",
+     "https://www.bmh.manchester.ac.uk/study/medicine/apply/ucat/", None),
+    ("Newcastle University", "Medicine", "England", "weighted", None, "Band 4", 60.0,
+     "UCAT is scored out of 60 points (higher UCAT = more points), combined with recent academic grades "
+     "(out of 40) into an 'academic screen' score, which is then weighted 50:50 with interview performance. "
+     "SJT Band 4 is rejected automatically. International and A101 applicants are scored on UCAT alone.",
+     "https://www.ncl.ac.uk/medicine/study/undergraduate/apply-medicine/", "2026 entry"),
+    ("University of Nottingham", "Medicine", "England", "weighted", None, "Band 4", None,
+     "No fixed interview threshold — it changes every year. GCSE points (up to 32 for A100, 24 for A108) "
+     "are added to UCAT-based points (up to 50: 40 cognitive + 10 SJT). SJT Band 4 is rejected outright.",
+     "https://www.nottingham.ac.uk/medicine/study-with-us/undergraduate/undergraduate-medicine/"
+     "undergraduate-selection-process.aspx", None),
+    ("Cardiff University", "Medicine", "Wales", "weighted", None, None, None,
+     "Cardiff prioritises academic qualifications first; a UCAT cut-off is only introduced if the number "
+     "of top-academic-score applicants exceeds available interview slots (around 1,000), and that cut-off "
+     "can't be predicted or compared to previous years. A recent past cycle reportedly used a cut-off "
+     "around 2690 when oversubscribed — treat that as historical colour, not a current requirement.",
+     "https://www.cardiff.ac.uk/documents/2734195-admissions-information-for-studying-medicine-at-cardiff", None),
+    ("University of Aberdeen", "Medicine", "Scotland", "weighted", None, "Band 4", 40.0,
+     "No minimum UCAT cut-off — score is set relative to that year's applicant pool. SJT Band 4 is not "
+     "normally considered. Pre-interview weighting is UCAT 40% / academic 60%; post-interview, interview "
+     "counts 50%, academic 30%, UCAT 20%.",
+     "https://www.abdn.ac.uk/smmsn/undergraduate/medicine/entrance-requirements/ucat/", None),
+    ("University of Bristol", "Medicine", "England", "ranking", None, None, None,
+     "Once minimum academic requirements are met, interview selection is 100% UCAT-weighted (cognitive "
+     "subtests only — SJT is excluded from the ranking score, and the personal statement isn't scored at "
+     "all). The actual threshold to reach interview changes every cycle and isn't set in advance.",
+     "https://www.bristol.ac.uk/study/undergraduate/2027/medicine/mb-chb-medicine/", None),
+    ("University of Dundee", "Medicine", "Scotland", "not_verified", None, None, None,
+     "Reported elsewhere to rank applicants into UCAT deciles blended with academic score (roughly 60:40 "
+     "academic:UCAT for school-leavers, 40:60 for graduates), but this could not be confirmed directly "
+     "against Dundee's own admissions page (it returned an access error during verification) — check "
+     "dundee.ac.uk before relying on this.",
+     "https://www.dundee.ac.uk/undergraduate/medicine-mbchb/entry-requirements", None),
+]
+
+
+def _sync_schools(conn):
+    """Insert or refresh every row in _SCHOOLS, keyed by (name, course), so a
+    yearly data refresh updates existing rows in place rather than duplicating
+    them. Rows added by an admin through Manage (not present in _SCHOOLS) are
+    left untouched."""
+    now = date.today().isoformat()
+    existing = {(r["name"], r["course"]): r["id"] for r in _q(conn, "SELECT id, name, course FROM schools")}
+    added = 0
+    for (name, course, country, usage_type, cutoff_score, sjt_band_cutoff,
+         weighting_pct, detail, source_url, cycle_year) in _SCHOOLS:
+        params = {"name": name, "course": course, "country": country, "usage_type": usage_type,
+                  "cutoff_score": cutoff_score, "sjt_band_cutoff": sjt_band_cutoff,
+                  "weighting_pct": weighting_pct, "detail": detail, "source_url": source_url,
+                  "cycle_year": cycle_year, "last_verified": now}
+        if (name, course) in existing:
+            params["id"] = existing[(name, course)]
+            _run(conn, _n("""UPDATE schools SET country=:country, usage_type=:usage_type,
+                       cutoff_score=:cutoff_score, sjt_band_cutoff=:sjt_band_cutoff,
+                       weighting_pct=:weighting_pct, detail=:detail, source_url=:source_url,
+                       cycle_year=:cycle_year, last_verified=:last_verified WHERE id=:id"""), params)
+        else:
+            _run(conn, _n("""INSERT INTO schools (name, course, country, usage_type, cutoff_score,
+                       sjt_band_cutoff, weighting_pct, detail, source_url, cycle_year, last_verified)
+                       VALUES (:name, :course, :country, :usage_type, :cutoff_score, :sjt_band_cutoff,
+                       :weighting_pct, :detail, :source_url, :cycle_year, :last_verified)"""), params)
+            added += 1
+    _commit(conn)
+    return added
+
+
+def sync_schools():
+    """Public entry point for the yearly data refresh: re-applies _SCHOOLS to
+    the database immediately, without waiting for a process restart."""
+    conn = get_conn()
+    try:
+        return _sync_schools(conn)
+    finally:
+        _close(conn)
+
+
 def _sync_subject_colors():
     """Keep each subject's color in sync with _SUBJECTS, so a palette change here
     reaches every deployment's existing rows, not just freshly-seeded databases."""
@@ -3585,6 +3791,7 @@ def seed_content():
         _commit(conn)
         # Exactly-UCAT-formatted content (passage sets + standalone questions)
         _sync_content(conn, code_to_id, topic_key_to_id)
+        _sync_schools(conn)
     finally:
         _close(conn)
 
@@ -3655,6 +3862,7 @@ def backfill_content():
         # and refreshes already-seeded ones (e.g. 3-option TFC, 5-option QR) in
         # place, so an existing deployment updates without a manual reload.
         added_q += _sync_content(conn, code_to_id, topic_key_to_id)
+        _sync_schools(conn)
     finally:
         _close(conn)
     return {"topics_added": added_t, "questions_added": added_q, "flashcards_added": added_f}
