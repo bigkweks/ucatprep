@@ -1833,7 +1833,7 @@ _SUBJECTS = [
 _TOPICS = [
     ("VR", "Reading for the Main Idea", 1,
      "Skim efficiently — you have only seconds per question.",
-     "Verbal Reasoning gives **~44 questions in ~21 minutes**, so you cannot read every passage in full.\n\n- **Scan for keywords** from the question, then read only the sentence(s) around them.\n- Decide each item from the **passage alone** — never from outside knowledge.\n- The credited answer is the one the text best supports, not the most interesting one."),
+     "Verbal Reasoning gives **44 questions in 22 minutes**, so reading must be selective and purposeful.\n\n- **Scan for keywords** from the question, then read the relevant context carefully.\n- Decide each item from the **passage alone** — never from outside knowledge.\n- The credited answer is the one the text best supports, not the most interesting one."),
     ("VR", "True / False / Can't Tell", 1,
      "The classic VR judgement: is the statement supported, contradicted, or neither?",
      "- **True** — the passage directly states or clearly implies it.\n- **False** — the passage contradicts it.\n- **Can't Tell** — there isn't enough information to decide. Use this whenever the passage is silent.\n\n**Trap:** absolute words ('all', 'never', 'always') make a statement easy to falsify — a single exception in the text makes it false."),
@@ -1852,6 +1852,12 @@ _TOPICS = [
     ("DM", "Logic Puzzles & Arrangements", 0,
      "Ordering, matching, and conditional clues.",
      "Decision Making often gives a set of clues and asks who/what fits.\n\n- Translate clues into a quick **grid or ordering**.\n- Process the **most restrictive clue first**.\n- Eliminate options that violate any single clue rather than fully solving every case."),
+    ("DM", "Evaluating Arguments", 1,
+     "Judge whether an argument is relevant, important, and directly addresses the issue.",
+     "A strong argument addresses the exact proposal and gives an important reason supported by the information available. Personal preference, tradition, irrelevant facts, and unsupported absolutes are weak even when their conclusion sounds agreeable."),
+    ("DM", "Interpreting Information", 1,
+     "Combine tables, schedules, evidence, and conditional information accurately.",
+     "Identify the claim being tested, select only relevant figures, and distinguish an observed association from a causal conclusion. Check denominators, comparison groups, timing, and whether the evidence supports **must**, **could**, or merely **was observed**."),
     ("QR", "Percentages & Percentage Change", 1,
      "The most common QR skill — increases, decreases, and reverse percentages.",
      "- **Increase by x%:** multiply by (1 + x/100). A 25% rise on 80 → 80 × 1.25 = 100.\n- **Percentage change:** (change ÷ original) × 100.\n- **Reverse percentage:** if a price after +20% is 120, original = 120 ÷ 1.2 = 100.\n- Use the on-screen calculator sparingly — many can be done mentally."),
@@ -1870,6 +1876,9 @@ _TOPICS = [
     ("SJT", "Importance Ratings", 1,
      "Rate how important a consideration is when deciding what to do.",
      "Scale: **Very important · Important · Of minor importance · Not important at all.**\n\n- Considerations tied to **patient safety, professional duty, and the people directly affected** are usually very important.\n- Irrelevant, self-serving, or speculative considerations are *not important*.\n- Don't confuse 'true' with 'important' — a true but irrelevant fact can still be unimportant."),
+    ("SJT", "Most / Least Appropriate", 1,
+     "Select the most and least appropriate actions from three alternatives.",
+     "Judge the three actions against patient safety, honesty, confidentiality, competence, proportionality, and effective escalation. The most appropriate option should address the central issue constructively; the least appropriate usually creates or conceals the greatest risk."),
     ("SJT", "Medical Ethics & Professionalism", 1,
      "The values the SJT rewards, anchored in GMC Good Medical Practice.",
      "Default to the **GMC 'Good Medical Practice'** principles:\n\n- **Patient safety first**, always.\n- **Confidentiality, honesty and integrity** (probity).\n- **Work within your competence** and seek senior help when unsure.\n- Raise concerns about colleagues **supportively but without delay** when patients could be at risk. SJT is scored in **Bands 1–4** (Band 1 = strongest), separately from the cognitive subtests."),
@@ -3544,6 +3553,36 @@ _FLASHCARDS = [
     ("SJT", "Importance Ratings", "Which considerations are usually 'very important' in the SJT?", "Those tied to patient safety, professional duty, and the people directly affected. Remember a fact can be true yet unimportant."),
 ]
 
+# Keep an exact inventory of the previously shipped seed items before loading
+# the rewritten bank. `_sync_content` uses this inventory to retire only known
+# superseded seed rows. User-created questions have different stems and are not
+# matched or changed; old rows remain in the database so attempt history keeps
+# its foreign-key targets.
+_PREVIOUS_SEEDED_STEMS = (
+    {q[2] for q in _QUESTIONS}
+    | {q[0] for _code, _topic, _title, _body, questions in _PASSAGE_SETS for q in questions}
+    | {q[2] for q in _STANDALONE_QUESTIONS}
+    | {q[2] for q in _DM_YESNO_QUESTIONS}
+)
+
+from question_bank import (
+    PASSAGE_SETS as _REWRITTEN_PASSAGE_SETS,
+    STANDALONE_QUESTIONS as _REWRITTEN_STANDALONE_QUESTIONS,
+    DM_YESNO_QUESTIONS as _REWRITTEN_DM_YESNO_QUESTIONS,
+)
+
+_QUESTIONS = []
+_PASSAGE_SETS = _REWRITTEN_PASSAGE_SETS
+_STANDALONE_QUESTIONS = _REWRITTEN_STANDALONE_QUESTIONS
+_DM_YESNO_QUESTIONS = _REWRITTEN_DM_YESNO_QUESTIONS
+
+_CURRENT_SEEDED_STEMS = (
+    {q[0] for _code, _topic, _title, _body, questions in _PASSAGE_SETS for q in questions}
+    | {q[2] for q in _STANDALONE_QUESTIONS}
+    | {q[2] for q in _DM_YESNO_QUESTIONS}
+)
+_RETIRED_SEEDED_STEMS = _PREVIOUS_SEEDED_STEMS - _CURRENT_SEEDED_STEMS
+
 
 # Verified UK medical/dental school UCAT usage data. Each tuple is:
 # (name, course, country, usage_type, cutoff_score, sjt_band_cutoff, weighting_pct,
@@ -3689,6 +3728,15 @@ def _sync_content(conn, code_to_id, topic_key_to_id):
     existing = {r["stem"]: r["id"] for r in _q(conn, "SELECT id, stem FROM questions")}
     added = 0
 
+    # Retire only stems that belonged to earlier shipped seed banks. Rows are
+    # retained so attempts and mistakes continue to reference valid questions.
+    # Unmatched user-created questions are deliberately outside this set.
+    if _RETIRED_SEEDED_STEMS:
+        retired = sorted(_RETIRED_SEEDED_STEMS)
+        ph = _ph()
+        marks = ",".join([ph] * len(retired))
+        _run(conn, f"UPDATE questions SET active = 0 WHERE stem IN ({marks})", tuple(retired))
+
     def upsert_q(code, tname, pid, qt, fmt="single"):
         nonlocal added
         stem, a, b, c, d, e, correct, expl, diff = _unpack_question(qt)
@@ -3718,10 +3766,20 @@ def _sync_content(conn, code_to_id, topic_key_to_id):
                        {"s": code_to_id[code], "t": topic_key_to_id.get((code, tname)),
                         "ti": title, "b": body, "ca": now})
             title_to_id[title] = pid
+        else:
+            _run(conn, _n("""UPDATE passages SET subject_id=:s, topic_id=:t, body=:b
+                           WHERE id=:id"""),
+                 {"s": code_to_id[code], "t": topic_key_to_id.get((code, tname)),
+                  "b": body, "id": pid})
         keep = []
         for qt in questions:
-            keep.append(_unpack_question(qt)[0])
-            upsert_q(code, tname, pid, qt)
+            unpacked = _unpack_question(qt)
+            keep.append(unpacked[0])
+            # The existing `multi` storage represents any response with more
+            # than one selected component. DM uses a set of Yes statements;
+            # SJT stores an ordered most,least pair. This preserves the schema.
+            fmt = "multi" if code == "SJT" and "," in unpacked[6] else "single"
+            upsert_q(code, tname, pid, qt, fmt=fmt)
         # Retire any stale questions still attached to this passage whose stem is
         # no longer in the current set (e.g. a question that was reworded), so an
         # existing deployment stops serving the superseded version.

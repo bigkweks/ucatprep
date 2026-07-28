@@ -2066,11 +2066,21 @@ def _render_passage(q, quiz, idx):
                    "the passage stays visible for every question in the set.")
 
 
+def _is_rank(q):
+    """True for SJT's ordered most/least-appropriate response format.
+
+    The existing `multi` storage supports both multi-component formats without
+    a schema change: DM stores a set of Yes statements and SJT stores an ordered
+    `most,least` pair. Three options plus the SJT subject identify the latter.
+    """
+    return (q.get("question_format") == "multi"
+            and q.get("subject_name") == "Situational Judgement"
+            and len(_q_options(q)) == 3)
+
+
 def _is_multi(q):
-    """True for Decision Making's real 'Yes/No statements' format, where a
-    question has several independently-judged statements and more than one can
-    be correct — as opposed to the usual single-best-answer format."""
-    return q.get("question_format") == "multi"
+    """True for Decision Making's five-statement Yes/No format."""
+    return q.get("question_format") == "multi" and not _is_rank(q)
 
 
 def _is_correct(q, chosen):
@@ -2078,10 +2088,41 @@ def _is_correct(q, chosen):
     comma-joined set of letters (the statements marked 'Yes') and must match the
     full correct set exactly, mirroring the real UCAT task where every
     statement must be judged correctly."""
+    if _is_rank(q):
+        return (chosen or "") == q["correct"]
     if _is_multi(q):
         picked = {x for x in (chosen or "").split(",") if x}
         return picked == set(q["correct"].split(","))
     return chosen == q["correct"]
+
+
+def _answer_score(q, chosen):
+    """Return `(marks_awarded, marks_available)` for practice/mock feedback.
+
+    DM's five-statement format is worth 2 marks when all five judgements match
+    and 1 mark when four match. For SJT, the Consortium confirms partial credit
+    but does not publish the live conversion; this practice approximation gives
+    half credit to an adjacent rating and one of two marks for each correctly
+    placed most/least component.
+    """
+    if _is_rank(q):
+        correct = q["correct"].split(",")
+        picked = (chosen or "").split(",")
+        matches = sum(i < len(picked) and picked[i] == correct[i] for i in range(2))
+        return matches, 2
+    if _is_multi(q):
+        options = _q_options(q)
+        correct_yes = set(q["correct"].split(","))
+        picked_yes = {x for x in (chosen or "").split(",") if x}
+        matches = sum((letter in correct_yes) == (letter in picked_yes) for letter in options)
+        return (2 if matches == 5 else 1 if matches == 4 else 0), 2
+    if q.get("subject_name") == "Situational Judgement":
+        options = list(_q_options(q))
+        if chosen not in options:
+            return 0, 1
+        distance = abs(options.index(chosen) - options.index(q["correct"]))
+        return (1 if distance == 0 else 0.5 if distance == 1 else 0), 1
+    return (1 if chosen == q["correct"] else 0), 1
 
 
 def _answer_input(q, key, prev=None):
@@ -2091,6 +2132,24 @@ def _answer_input(q, key, prev=None):
     multi-statement Yes/No format. `prev` restores a previously-saved answer
     (used by the Mock Exam, where a question can be revisited via Back)."""
     options = _q_options(q)
+    if _is_rank(q):
+        keys = list(options)
+        prev_parts = (prev or "").split(",")
+        most_default = prev_parts[0] if prev_parts and prev_parts[0] in options else keys[0]
+        most = st.radio(
+            "Most appropriate action:", keys,
+            format_func=lambda k: f"{k}. {options[k]}",
+            index=keys.index(most_default), key=f"{key}_most",
+        )
+        least_keys = [k for k in keys if k != most]
+        least_default = (prev_parts[1] if len(prev_parts) > 1 and prev_parts[1] in least_keys
+                         else least_keys[-1])
+        least = st.radio(
+            "Least appropriate action:", least_keys,
+            format_func=lambda k: f"{k}. {options[k]}",
+            index=least_keys.index(least_default), key=f"{key}_least",
+        )
+        return f"{most},{least}"
     if _is_multi(q):
         st.caption("For each statement, check the box if it **follows** from the information above "
                    "(Yes). Leave it unchecked if it does not follow (No). More than one may be correct.")
@@ -2108,6 +2167,20 @@ def _render_answer_review(q, chosen):
     Yes/No comparison for Decision Making's multi-format questions, or the usual
     highlighted single choice otherwise."""
     options = _q_options(q)
+    if _is_rank(q):
+        correct_most, correct_least = q["correct"].split(",")
+        chosen_parts = (chosen or "").split(",")
+        chosen_most = chosen_parts[0] if chosen_parts else ""
+        chosen_least = chosen_parts[1] if len(chosen_parts) > 1 else ""
+        for k, v in options.items():
+            correct_role = ("most appropriate" if k == correct_most else
+                            "least appropriate" if k == correct_least else "neither")
+            chosen_role = ("most appropriate" if k == chosen_most else
+                           "least appropriate" if k == chosen_least else "neither")
+            mark = "✓" if correct_role == chosen_role else "✗"
+            st.markdown(f"{mark} **{k}. {v}** — you chose **{chosen_role}**; "
+                        f"correct is **{correct_role}**")
+        return
     if _is_multi(q):
         correct_set = set(q["correct"].split(","))
         chosen_set = {x for x in (chosen or "").split(",") if x}
@@ -2241,10 +2314,17 @@ def page_practice():
             st.rerun()
     else:
         _render_answer_review(q, answered)
+        marks, marks_available = _answer_score(q, answered)
         if _is_correct(q, answered):
             st.success("Correct!")
             if ss.pop("_play_ding", False):
                 _play_ding()
+        elif marks:
+            st.warning(f"Partially correct — **{marks:g} of {marks_available:g}** practice marks.")
+        elif _is_rank(q):
+            most, least = q["correct"].split(",")
+            st.error(f"Not quite — the most appropriate action is **{most}** and the least "
+                     f"appropriate action is **{least}**.")
         elif _is_multi(q):
             st.error("Not fully correct — every statement must be judged correctly to score this "
                      "question, as in the real UCAT.")
@@ -3872,14 +3952,17 @@ def _finish_mock(ss, elapsed):
         db.record_attempts_bulk(ss["user_id"], batch)
 
         rows = _mock_results(ss)
-        total_q = sum(r["total"] for r in rows.values())
-        total_correct = sum(r["correct"] for r in rows.values())
+        total_q = sum(r["questions"] for r in rows.values())
+        total_exact = sum(r["exact"] for r in rows.values())
         cog_total = None
         if any(code in COGNITIVE_CODES for code in rows):
             cog_total = sum(est_scaled_score(r["correct"] / r["total"] * 100 if r["total"] else 0)
                              for code, r in rows.items() if code in COGNITIVE_CODES)
         if total_q:
-            db.record_mock_result(ss["user_id"], total_correct, total_q, cog_total)
+            # Historical mock storage records exact-question accuracy as whole
+            # numbers; detailed format-aware marks are calculated for the live
+            # result screen without changing that established schema.
+            db.record_mock_result(ss["user_id"], total_exact, total_q, cog_total)
 
         _invalidate_stats_cache()
         ss["mock_graded"] = True
@@ -3895,10 +3978,14 @@ def _mock_results(ss):
         code = SUB_BY_ID[q["subject_id"]]["code"]
         r = rows.setdefault(code, {"name": SUB_BY_ID[q["subject_id"]]["name"],
                                    "color": SUB_BY_ID[q["subject_id"]]["color"],
-                                   "correct": 0, "total": 0})
-        r["total"] += 1
+                                   "correct": 0.0, "total": 0.0,
+                                   "exact": 0, "questions": 0})
+        r["questions"] += 1
+        marks, available = _answer_score(q, answers.get(i))
+        r["correct"] += marks
+        r["total"] += available
         if answers.get(i) is not None and _is_correct(q, answers.get(i)):
-            r["correct"] += 1
+            r["exact"] += 1
     return rows
 
 
@@ -3909,11 +3996,13 @@ def page_mock():
     # ── Results screen ────────────────────────────────────────────────────────
     if ss.get("mock_done"):
         rows = _mock_results(ss)
-        total_q = sum(r["total"] for r in rows.values())
-        total_correct = sum(r["correct"] for r in rows.values())
+        total_questions = sum(r["questions"] for r in rows.values())
+        total_marks = sum(r["correct"] for r in rows.values())
+        available_marks = sum(r["total"] for r in rows.values())
         used = ss.get("mock_elapsed", 0)
-        st.success(f"## Mock complete — {total_correct}/{total_q} correct "
-                   f"({(total_correct/total_q*100) if total_q else 0:.0f}%)")
+        st.success(f"## Mock complete — {total_marks:g}/{available_marks:g} practice marks "
+                   f"across {total_questions} questions "
+                   f"({(total_marks/available_marks*100) if available_marks else 0:.0f}%)")
         st.caption(f"Time used: {fmt_mmss(used)} of {fmt_mmss(ss.get('mock_budget', 0))}")
 
         answered_times = {i: t for i, t in ss.get("mock_times", {}).items()
@@ -3936,9 +4025,9 @@ def page_mock():
                 sc = est_scaled_score(acc)
                 cog_total += sc
                 cog_any = True
-                col.metric(r["name"], sc, help=f"{r['correct']}/{r['total']} correct · indicative 300–900")
+                col.metric(r["name"], sc, help=f"{r['correct']:g}/{r['total']:g} marks · indicative 300–900")
             else:
-                col.metric(r["name"], est_sjt_band(acc), help=f"{r['correct']}/{r['total']} correct · indicative band")
+                col.metric(r["name"], est_sjt_band(acc), help=f"{r['correct']:g}/{r['total']:g} practice marks · indicative band")
         if cog_any:
             st.caption(f"Indicative cognitive total: **{cog_total} / 2700**. "
                        "Estimates from accuracy only — not official UCAT scores. "
@@ -3949,9 +4038,19 @@ def page_mock():
                 chosen = ss["mock_answers"].get(i)
                 skipped = chosen is None
                 ok = (not skipped) and _is_correct(q, chosen)
-                mark = "✓" if ok else ("–" if skipped else "✗")
+                marks, _available = _answer_score(q, chosen)
+                mark = "✓" if ok else ("–" if skipped else "◐" if marks else "✗")
                 st.markdown(f"{mark} **{q['stem'][:90]}**")
-                if _is_multi(q):
+                if _is_rank(q):
+                    chosen_parts = (chosen or "").split(",")
+                    correct_parts = q["correct"].split(",")
+                    st.caption(
+                        f"Your most/least: {chosen_parts[0] if chosen_parts else '—'} / "
+                        f"{chosen_parts[1] if len(chosen_parts) > 1 else '—'} · "
+                        f"Correct most/least: {correct_parts[0]} / {correct_parts[1]}"
+                        + (" (skipped)" if skipped else "")
+                    )
+                elif _is_multi(q):
                     st.caption(f"Your Yes answers: {chosen.replace(',', ', ') if chosen else '— none'} · "
                                f"Correct Yes answers: {q['correct'].replace(',', ', ')}"
                                + (" (skipped)" if skipped else ""))
@@ -4010,7 +4109,7 @@ def page_mock():
 
         st.markdown("Sit a timed, UCAT-paced mock using your question bank. Each subtest is "
                     "timed at the real per-question rate, so the clock pressure mirrors the exam.")
-        st.caption("Official pacing — VR 44Q/21m · DM 35Q/37m · QR 36Q/26m · SJT 69Q/26m. "
+        st.caption("Official pacing — VR 44Q/22m · DM 35Q/37m · QR 36Q/26m · SJT 69Q/26m. "
                    "Add more questions in Manage to lengthen your mocks.")
 
         mock_summary = db.get_mock_summary(ss["user_id"])
