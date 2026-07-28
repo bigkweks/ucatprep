@@ -20,6 +20,7 @@ import html
 import subprocess
 import time
 import base64
+from contextlib import nullcontext
 from pathlib import Path
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -283,6 +284,16 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
     color: #FFFFFF !important; background: rgba(255,255,255,0.09);
     border: 1px solid rgba(255,255,255,0.12); border-radius: 4px;
     padding: 2px 5px; font-family: inherit; font-size: inherit;
+}
+
+/* Real-test VR composition: dense reading pane on the left, compact question
+   panel on the right. The passage scrolls independently so its question and
+   choices remain visible while the candidate checks evidence. */
+[class*="st-key-vr_passage_"] [data-testid="stMarkdownContainer"] p {
+    font-size: 14px !important; line-height: 1.46 !important;
+}
+[class*="st-key-vr_question_"] [data-testid="stMarkdownContainer"] h3 {
+    font-size: clamp(1.2rem, 1.7vw, 1.55rem) !important; line-height: 1.22 !important;
 }
 
 /* Buttons — subtle press feedback (scale down slightly on click) gives
@@ -2101,13 +2112,33 @@ def _render_passage(q, quiz, idx):
     if not q.get("passage_body"):
         return
     same = [i for i, qq in enumerate(quiz) if qq.get("passage_id") == q.get("passage_id")]
-    with st.container(border=True):
-        if q.get("passage_title"):
+    is_vr = q.get("subject_name") == "Verbal Reasoning"
+    passage_key = f"vr_passage_{q.get('passage_id')}_{idx}" if is_vr else None
+    with st.container(border=True, key=passage_key, height=560 if is_vr else "content"):
+        if is_vr:
+            st.markdown("<span style='font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;"
+                        "color:var(--ink-faint)'>PASSAGE</span>", unsafe_allow_html=True)
+        elif q.get("passage_title"):
             st.markdown(f"**{q['passage_title']}**")
         st.markdown(q["passage_body"])
     if len(same) > 1 and idx in same:
         st.caption(f"Passage question {same.index(idx) + 1} of {len(same)} — "
                    "the passage stays visible for every question in the set.")
+
+
+def _question_panel(q, quiz, idx):
+    """Render the stimulus and return the area where the question belongs.
+
+    Current UCAT VR keeps the full passage visible beside each of its four
+    questions. Other linked formats retain the app's stacked presentation.
+    """
+    if q.get("subject_name") == "Verbal Reasoning" and q.get("passage_body"):
+        passage_col, question_col = st.columns([1.2, 0.8], gap="large", vertical_alignment="top")
+        with passage_col:
+            _render_passage(q, quiz, idx)
+        return question_col.container(key=f"vr_question_{q.get('passage_id')}_{idx}")
+    _render_passage(q, quiz, idx)
+    return nullcontext()
 
 
 def _is_rank(q):
@@ -2335,54 +2366,54 @@ def page_practice():
     st.progress((idx) / len(quiz), text=f"Question {idx + 1} of {len(quiz)}")
     if sub:
         st.markdown(pill(sub["name"], sub["color"]) + f"  &nbsp; <span style='color:#888'>{q['difficulty']}</span>", unsafe_allow_html=True)
-    _render_passage(q, quiz, idx)
-    st.markdown(f"### {q['stem']}")
+    with _question_panel(q, quiz, idx):
+        st.markdown(f"### {q['stem']}")
 
-    answered = ss["quiz_answered"].get(idx)
+        answered = ss["quiz_answered"].get(idx)
 
-    if answered is None:
-        choice = _answer_input(q, key=f"q_{idx}")
-        if st.button("Submit answer", type="primary"):
-            is_correct = _is_correct(q, choice)
-            elapsed = datetime.now().timestamp() - ss.get("quiz_start", datetime.now().timestamp())
-            elapsed = round(elapsed, 1)
-            if uid:
-                db.record_attempt(uid, q["id"], q["subject_id"], choice, is_correct, elapsed)
-                _invalidate_stats_cache()
-            ss["quiz_answered"][idx] = choice
-            ss["quiz_times"][idx] = elapsed
-            if is_correct:
-                ss["quiz_correct"] += 1
-                ss["_play_ding"] = True
-            ss["quiz_start"] = datetime.now().timestamp()
-            st.rerun()
-    else:
-        _render_answer_review(q, answered)
-        marks, marks_available = _answer_score(q, answered)
-        if _is_correct(q, answered):
-            st.success("Correct!")
-            if ss.pop("_play_ding", False):
-                _play_ding()
-        elif marks:
-            st.warning(f"Partially correct — **{marks:g} of {marks_available:g}** practice marks.")
-        elif _is_rank(q):
-            most, least = q["correct"].split(",")
-            st.error(f"Not quite — the most appropriate action is **{most}** and the least "
-                     f"appropriate action is **{least}**.")
-        elif _is_multi(q):
-            st.error("Not fully correct — every statement must be judged correctly to score this "
-                     "question, as in the real UCAT.")
+        if answered is None:
+            choice = _answer_input(q, key=f"q_{idx}")
+            if st.button("Submit answer", type="primary"):
+                is_correct = _is_correct(q, choice)
+                elapsed = datetime.now().timestamp() - ss.get("quiz_start", datetime.now().timestamp())
+                elapsed = round(elapsed, 1)
+                if uid:
+                    db.record_attempt(uid, q["id"], q["subject_id"], choice, is_correct, elapsed)
+                    _invalidate_stats_cache()
+                ss["quiz_answered"][idx] = choice
+                ss["quiz_times"][idx] = elapsed
+                if is_correct:
+                    ss["quiz_correct"] += 1
+                    ss["_play_ding"] = True
+                ss["quiz_start"] = datetime.now().timestamp()
+                st.rerun()
         else:
-            st.error(f"Not quite — the answer is **{q['correct']}**.")
-        taken = ss["quiz_times"].get(idx)
-        if taken is not None:
-            target = seconds_per_question(SUB_BY_ID[q["subject_id"]]["code"])
-            st.caption(f"Answered in **{taken:.1f}s** · target for {sub['name'] if sub else 'this subtest'}: ~{target:.0f}s")
-        if q.get("explanation"):
-            st.info(f"**Explanation.** {q['explanation']}")
-        if st.button("Next", type="primary"):
-            ss["quiz_idx"] += 1
-            st.rerun()
+            _render_answer_review(q, answered)
+            marks, marks_available = _answer_score(q, answered)
+            if _is_correct(q, answered):
+                st.success("Correct!")
+                if ss.pop("_play_ding", False):
+                    _play_ding()
+            elif marks:
+                st.warning(f"Partially correct — **{marks:g} of {marks_available:g}** practice marks.")
+            elif _is_rank(q):
+                most, least = q["correct"].split(",")
+                st.error(f"Not quite — the most appropriate action is **{most}** and the least "
+                         f"appropriate action is **{least}**.")
+            elif _is_multi(q):
+                st.error("Not fully correct — every statement must be judged correctly to score this "
+                         "question, as in the real UCAT.")
+            else:
+                st.error(f"Not quite — the answer is **{q['correct']}**.")
+            taken = ss["quiz_times"].get(idx)
+            if taken is not None:
+                target = seconds_per_question(SUB_BY_ID[q["subject_id"]]["code"])
+                st.caption(f"Answered in **{taken:.1f}s** · target for {sub['name'] if sub else 'this subtest'}: ~{target:.0f}s")
+            if q.get("explanation"):
+                st.info(f"**Explanation.** {q['explanation']}")
+            if st.button("Next", type="primary"):
+                ss["quiz_idx"] += 1
+                st.rerun()
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -3564,7 +3595,10 @@ def page_manage():
         else:
             with st.form("add_q", clear_on_submit=True):
                 st.markdown("**Add a practice question**")
-                sname = st.selectbox("Subtest", [s["name"] for s in SUBJECTS], key="mq_sub")
+                st.caption("Verbal Reasoning uses curated four-question passage sets and cannot be "
+                           "added here as a standalone question.")
+                standalone_subjects = [s["name"] for s in SUBJECTS if s["code"] != "VR"]
+                sname = st.selectbox("Subtest", standalone_subjects, key="mq_sub")
                 stem = st.text_area("Question stem")
                 c = st.columns(2)
                 a = c[0].text_input("Option A")
@@ -3602,7 +3636,8 @@ def page_manage():
         for q in _paginate(filtered, "mq_page"):
             retired = "" if (q.get("active") in (1, None)) else " · retired"
             with st.expander(f"[{SUB_BY_ID.get(q['subject_id'],{}).get('name','?')}] {q['stem'][:70]}{retired}"):
-                locked = q.get("question_format") == "multi" or q.get("passage_id")
+                is_vr = SUB_BY_ID.get(q["subject_id"], {}).get("code") == "VR"
+                locked = q.get("question_format") == "multi" or q.get("passage_id") or is_vr
                 edit_key = f"editq_{q['id']}"
                 if not is_admin:
                     st.markdown(f"**Correct:** {q['correct']} · **Difficulty:** {q['difficulty']}{retired}")
@@ -3610,8 +3645,12 @@ def page_manage():
                 elif locked:
                     st.markdown(f"**Correct:** {q['correct']} · **Difficulty:** {q['difficulty']}{retired}")
                     st.caption(q.get("explanation") or "")
-                    st.caption("This question is part of a passage set or uses the multi-statement format — "
-                               "editing those isn't supported here yet. You can still delete it.")
+                    if is_vr:
+                        st.caption("VR questions are controlled as complete four-question passage sets. "
+                                   "Standalone legacy rows stay retired; editing them here is disabled.")
+                    else:
+                        st.caption("This question is part of a passage set or uses the multi-statement format — "
+                                   "editing those isn't supported here yet. You can still delete it.")
                     if st.button("Delete", key=f"delq_{q['id']}"):
                         db.delete_question(q["id"])
                         _invalidate_content_cache()
@@ -4283,11 +4322,10 @@ def page_mock():
     if sub:
         st.markdown(pill(sub["name"], sub["color"]) + f"  &nbsp; <span style='color:#888'>{q['difficulty']}</span>",
                     unsafe_allow_html=True)
-    _render_passage(q, quiz, idx)
-    st.markdown(f"### {q['stem']}")
-
-    prev = ss["mock_answers"].get(idx)
-    choice = _answer_input(q, key=f"mock_q_{idx}", prev=prev)
+    with _question_panel(q, quiz, idx):
+        st.markdown(f"### {q['stem']}")
+        prev = ss["mock_answers"].get(idx)
+        choice = _answer_input(q, key=f"mock_q_{idx}", prev=prev)
 
     nav = st.columns([1, 1, 1, 3])
     if nav[0].button("◀ Back", disabled=idx == 0):

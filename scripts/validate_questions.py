@@ -146,10 +146,39 @@ def check_structure_and_coverage() -> None:
     mcq = [item for item in vr_items if len(item.options) == 4]
     if (len(tfc), len(mcq)) != (16, 28):
         fail(f"[format] VR T/F/CT and MCQ counts are {(len(tfc), len(mcq))}, expected (16, 28)")
-    for title, body in {(item.passage_title, item.passage_body) for item in vr_items}:
+    vr_sets = sets_by_code["VR"]
+    tfc_sets = [group for group in vr_sets if all(
+        tuple(value for value in db._unpack_question(raw)[1:6] if value)
+        == ("True", "False", "Can't Tell") for raw in group[4]
+    )]
+    mcq_sets = [group for group in vr_sets if all(
+        len(tuple(value for value in db._unpack_question(raw)[1:6] if value)) == 4
+        for raw in group[4]
+    )]
+    if (len(tfc_sets), len(mcq_sets)) != (4, 7):
+        fail(f"[format] VR must have 4 pure T/F/CT sets and 7 pure MCQ sets; "
+             f"found {(len(tfc_sets), len(mcq_sets))}")
+    if len({group[2] for group in vr_sets}) != 11:
+        fail("[dedup] VR passage titles must be unique")
+    for _code, _topic, title, body, questions in vr_sets:
         words = len((body or "").split())
-        if not 240 <= words <= 360:
-            fail(f"[density] VR passage {title!r} has {words} words; expected 240–360")
+        if not 280 <= words <= 330:
+            fail(f"[density] VR passage {title!r} has {words} words; expected 280–330")
+        paragraphs = [p for p in re.split(r"\n\s*\n", body.strip()) if p]
+        if len(paragraphs) != 4:
+            fail(f"[density] VR passage {title!r} has {len(paragraphs)} paragraphs; expected exactly 4")
+        paragraph_words = [len(p.split()) for p in paragraphs]
+        if any(not 55 <= count <= 100 for count in paragraph_words):
+            fail(f"[density] VR passage {title!r} paragraph lengths are {paragraph_words}; "
+                 "each must be 55–100 words")
+        unpacked = [db._unpack_question(raw) for raw in questions]
+        if not any(raw[8] == "Hard" for raw in unpacked):
+            fail(f"[difficulty] VR set {title!r} has no Hard question")
+        if any(raw[0].lstrip().lower().startswith("passage:") for raw in unpacked):
+            fail(f"[format] VR set {title!r} embeds a passage inside a question stem")
+    vr_difficulties = Counter(item.difficulty for item in vr_items)
+    if vr_difficulties["Hard"] < 14 or vr_difficulties["Easy"] > 8:
+        fail(f"[difficulty] VR mix is too light for the target bank: {dict(vr_difficulties)}")
 
     dm_items = [item for item in ITEMS if item.code == "DM"]
     dm_single = [item for item in dm_items if item.question_format == "single"]
@@ -561,6 +590,14 @@ def check_live_seed_smoke_test() -> None:
             VALUES(?, 'User-created sentinel question', 'A', 'B', 'C', 'D', 'A',
                    'User-created sentinel explanation.', 'Medium', 'single', 1)
         """, (custom_subject,)).lastrowid
+        vr_subject = conn.execute("SELECT id FROM subjects WHERE code='VR'").fetchone()[0]
+        short_vr_id = conn.execute("""
+            INSERT INTO questions(subject_id, stem, option_a, option_b, option_c, option_d,
+                                  correct, explanation, difficulty, question_format, active)
+            VALUES(?, 'Passage: A one-sentence user-created VR sentinel.',
+                   'True', 'False', 'Can''t Tell', 'Partly true', 'A',
+                   'Short standalone VR sentinel explanation.', 'Medium', 'single', 1)
+        """, (vr_subject,)).lastrowid
         retired_stem = sorted(fresh._RETIRED_SEEDED_STEMS)[0]
         retired_id = conn.execute("""
             INSERT INTO questions(subject_id, stem, option_a, option_b, option_c, option_d,
@@ -575,6 +612,10 @@ def check_live_seed_smoke_test() -> None:
             INSERT INTO attempts(user_id,question_id,subject_id,chosen,is_correct,seconds,created_at)
             VALUES(?,?,?,?,?,?,?)
         """, (user_id, retired_id, custom_subject, "A", 1, 1.0, "now"))
+        conn.execute("""
+            INSERT INTO attempts(user_id,question_id,subject_id,chosen,is_correct,seconds,created_at)
+            VALUES(?,?,?,?,?,?,?)
+        """, (user_id, short_vr_id, vr_subject, "A", 1, 1.0, "now"))
         conn.commit()
         conn.close()
 
@@ -583,19 +624,26 @@ def check_live_seed_smoke_test() -> None:
         conn = sqlite3.connect(fresh.DB_PATH)
         after = conn.execute("SELECT COUNT(*) FROM questions").fetchone()[0]
         custom_active = conn.execute("SELECT active FROM questions WHERE id=?", (custom_id,)).fetchone()[0]
+        short_vr_active = conn.execute("SELECT active FROM questions WHERE id=?", (short_vr_id,)).fetchone()[0]
         retired_active = conn.execute("SELECT active FROM questions WHERE id=?", (retired_id,)).fetchone()[0]
         attempt_count = conn.execute("SELECT COUNT(*) FROM attempts WHERE question_id=?", (retired_id,)).fetchone()[0]
+        short_vr_attempts = conn.execute("SELECT COUNT(*) FROM attempts WHERE question_id=?", (short_vr_id,)).fetchone()[0]
         conn.close()
+        served_vr = fresh.get_questions(subject_id=vr_subject)
         if first != {"topics_added": 0, "questions_added": 0, "flashcards_added": 0}:
             fail(f"[smoke] first idempotent backfill reported {first}")
         if second != {"topics_added": 0, "questions_added": 0, "flashcards_added": 0}:
             fail(f"[smoke] second idempotent backfill reported {second}")
-        if after != before + 2:
-            fail(f"[smoke] backfill changed row count from {before + 2} to {after}")
+        if after != before + 3:
+            fail(f"[smoke] backfill changed row count from {before + 3} to {after}")
         if custom_active != 1:
             fail("[smoke] user-created sentinel was modified or retired")
         if retired_active != 0 or attempt_count != 1:
             fail("[smoke] superseded seed was not retired while preserving its attempt")
+        if short_vr_active != 0 or short_vr_attempts != 1:
+            fail("[smoke] standalone VR was not retired while preserving its attempt")
+        if len(served_vr) != 44 or any(not row.get("passage_id") for row in served_vr):
+            fail(f"[smoke] serving query exposed invalid VR rows; returned {len(served_vr)} items")
 
 
 def run() -> None:

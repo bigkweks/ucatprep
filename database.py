@@ -967,6 +967,10 @@ def get_questions(subject_id=None, topic_id=None, difficulty=None, limit=None, i
     params: list = []
     if not include_inactive:
         sql += " AND (q.active = 1 OR q.active IS NULL)"
+        # VR is always a shared full-length passage followed by four linked
+        # questions. Older/admin-created standalone rows are preserved for
+        # history and Manage, but must never appear in Practice or Mock.
+        sql += " AND (s.code <> 'VR' OR q.passage_id IS NOT NULL)"
     if subject_id:
         sql += f" AND q.subject_id = {ph}"
         params.append(subject_id)
@@ -996,6 +1000,7 @@ def get_question_counts_by_subject():
             SELECT s.id AS subject_id, s.name AS subject_name, s.color, COUNT(q.id) AS questions
             FROM subjects s LEFT JOIN questions q
                 ON q.subject_id = s.id AND (q.active = 1 OR q.active IS NULL)
+                AND (s.code <> 'VR' OR q.passage_id IS NOT NULL)
             GROUP BY s.id, s.name, s.color
             ORDER BY s.sort_order, s.name
         """)
@@ -1011,7 +1016,9 @@ def get_landing_stats():
     try:
         row = _q1(conn, """
             SELECT
-                (SELECT COUNT(*) FROM questions WHERE active = 1 OR active IS NULL) AS questions,
+                (SELECT COUNT(*) FROM questions q JOIN subjects s ON s.id = q.subject_id
+                    WHERE (q.active = 1 OR q.active IS NULL)
+                    AND (s.code <> 'VR' OR q.passage_id IS NOT NULL)) AS questions,
                 (SELECT COUNT(*) FROM flashcards) AS flashcards,
                 (SELECT COUNT(*) FROM subjects) AS subjects
         """) or {}
@@ -1760,7 +1767,9 @@ def get_overall_stats(user_id):
                 (SELECT COUNT(*) FROM flashcard_progress WHERE user_id = :uid AND reps >= 3) AS mastered,
                 (SELECT COUNT(*) FROM study_tasks WHERE status = 'Done' AND user_id = :uid) AS tasks_done,
                 (SELECT COUNT(*) FROM study_tasks WHERE user_id = :uid) AS tasks_total,
-                (SELECT COUNT(*) FROM questions) AS qs
+                (SELECT COUNT(*) FROM questions q JOIN subjects s ON s.id = q.subject_id
+                    WHERE (q.active = 1 OR q.active IS NULL)
+                    AND (s.code <> 'VR' OR q.passage_id IS NOT NULL)) AS qs
         """), {"uid": user_id, "today": today}) or {}
         return {
             "attempts": row.get("n") or 0,
@@ -3721,12 +3730,30 @@ def _sync_content(conn, code_to_id, topic_key_to_id):
     """Insert or refresh all exactly-UCAT-formatted content — passage sets and
     standalone questions — keyed by stem. Existing seeded questions are updated
     in place so format fixes (e.g. three-option True/False/Can't Tell, five-option
-    QR) reach already-seeded rows, while user-created questions (whose stems don't
-    match the seed) are left untouched. Returns the number of new questions added."""
+    QR) reach already-seeded rows. User-created content is otherwise left intact;
+    the one deliberate exception is invalid standalone/non-bank VR content, which
+    is retired (not deleted) so every served VR item uses a full linked passage.
+    Returns the number of new questions added."""
     now = datetime.now().isoformat()
     title_to_id = {r["title"]: r["id"] for r in _q(conn, "SELECT id, title FROM passages")}
     existing = {r["stem"]: r["id"] for r in _q(conn, "SELECT id, stem FROM questions")}
     added = 0
+
+    # The deployed database may contain legacy or admin-created one-sentence VR
+    # questions. They are not a current UCAT VR format. Keep the rows and their
+    # attempt history, but make only this authored 44-question bank active.
+    vr_subject_id = code_to_id.get("VR")
+    vr_stems = sorted(
+        _unpack_question(raw)[0]
+        for code, _topic, _title, _body, questions in _PASSAGE_SETS
+        if code == "VR"
+        for raw in questions
+    )
+    if vr_subject_id is not None and vr_stems:
+        ph = _ph()
+        marks = ",".join([ph] * len(vr_stems))
+        _run(conn, f"UPDATE questions SET active = 0 WHERE subject_id = {ph} "
+                   f"AND stem NOT IN ({marks})", tuple([vr_subject_id] + vr_stems))
 
     # Retire only stems that belonged to earlier shipped seed banks. Rows are
     # retained so attempts and mistakes continue to reference valid questions.
