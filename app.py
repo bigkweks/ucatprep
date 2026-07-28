@@ -17,6 +17,7 @@ import json
 import random
 import hmac
 import html
+import subprocess
 import time
 import base64
 from pathlib import Path
@@ -35,6 +36,33 @@ def _logo_img(height_px: int, extra_style: str = "") -> str:
         return ""
     return (f"<img src='data:image/png;base64,{_LOGO_B64}' "
             f"style='height:{height_px}px;width:{height_px}px;{extra_style}' />")
+
+
+def _runtime_commit() -> str:
+    """Return the short revision serving this app, when the host exposes it."""
+    # Deployment platforms vary in which source-revision variable they expose.
+    # The explicit app variable is useful when a host does not include .git.
+    for key in (
+        "UCATIFY_COMMIT", "APP_COMMIT", "GIT_COMMIT", "GIT_COMMIT_SHA",
+        "COMMIT_SHA", "SOURCE_COMMIT", "GITHUB_SHA", "STREAMLIT_GIT_COMMIT",
+    ):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value[:12]
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(Path(__file__).resolve().parent), "rev-parse", "--short=12", "HEAD"],
+            capture_output=True, text=True, timeout=2, check=False,
+        )
+        value = result.stdout.strip()
+        if result.returncode == 0 and value:
+            return value
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return "unavailable"
+
+
+APP_COMMIT = _runtime_commit()
 
 # Pull secrets into the environment before the data layer reads DATABASE_URL.
 try:
@@ -245,6 +273,17 @@ html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
 [data-testid="stSidebar"] button[kind^="secondary"] { background: rgba(255,255,255,0.07) !important; border: 1px solid rgba(255,255,255,0.3) !important; }
 [data-testid="stSidebar"] button[kind^="secondary"]:hover { background: rgba(255,255,255,0.14) !important; border-color: var(--teal-bright) !important; }
 [data-testid="stSidebar"] button[kind^="secondary"] p { color: var(--paper) !important; }
+.sidebar-commit {
+    position: fixed; left: 16px; bottom: 12px; width: min(280px, calc(100vw - 32px));
+    z-index: 5; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.14);
+    color: #9FB3AB !important; font-family: var(--mono); font-size: 10px;
+    letter-spacing: .04em; line-height: 1.4;
+}
+.sidebar-commit code {
+    color: #FFFFFF !important; background: rgba(255,255,255,0.09);
+    border: 1px solid rgba(255,255,255,0.12); border-radius: 4px;
+    padding: 2px 5px; font-family: inherit; font-size: inherit;
+}
 
 /* Buttons — subtle press feedback (scale down slightly on click) gives
    tactile confirmation that a tap registered, which matters more on the
@@ -1668,6 +1707,11 @@ with st.sidebar:
             st.rerun()
         st.markdown("---")
         st.caption("Full progress tracking, mock exams, and the AI tutor unlock once you have an account.")
+    st.markdown(
+        f"<div class='sidebar-commit' title='The source revision currently serving this app'>"
+        f"APP COMMIT <code>{html.escape(APP_COMMIT)}</code></div>",
+        unsafe_allow_html=True,
+    )
 
 
 # ── Top navigation ──────────────────────────────────────────────────────────────
