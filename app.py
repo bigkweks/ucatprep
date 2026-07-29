@@ -86,6 +86,7 @@ except ImportError:
     _HAS_ANTHROPIC = False
 
 import database as db
+from question_visuals import VISUALS, split_visual_markers
 
 # ── Cached data access ───────────────────────────────────────────────────────
 # Every repeated database read goes through one of these st.cache_data wrappers,
@@ -2106,6 +2107,46 @@ def _q_options(q):
     return {k: v for k, v in pairs if v not in (None, "")}
 
 
+def _render_question_visual(visual_id):
+    """Render a trusted visual stimulus from the fixed local registry."""
+    visual = VISUALS.get(visual_id)
+    if visual is None:
+        st.error("This question's visual could not be loaded.")
+        return
+    components.html(visual.html, height=visual.height, scrolling=False)
+
+
+def _render_rich_markdown(text):
+    """Render ordinary Markdown plus any trusted question-visual markers."""
+    clean, visual_ids = split_visual_markers(text or "")
+    if clean:
+        st.markdown(clean)
+    for visual_id in visual_ids:
+        _render_question_visual(visual_id)
+
+
+def _option_label(letter, value):
+    clean, _visual_ids = split_visual_markers(value or "")
+    return f"{letter}. {clean or f'Diagram {letter}'}"
+
+
+def _render_option_visuals(options):
+    """Show diagram-based answer choices in a compact two-column grid."""
+    visual_options = []
+    for letter, value in options.items():
+        clean, visual_ids = split_visual_markers(value)
+        if visual_ids:
+            visual_options.append((letter, clean, visual_ids))
+    if not visual_options:
+        return
+    columns = st.columns(2, gap="medium")
+    for index, (letter, clean, visual_ids) in enumerate(visual_options):
+        with columns[index % 2]:
+            st.markdown(f"**{letter}. {clean or f'Diagram {letter}'}**")
+            for visual_id in visual_ids:
+                _render_question_visual(visual_id)
+
+
 def _render_passage(q, quiz, idx):
     """Show the shared passage above a passage-linked question, and keep it
     visible for every question in the set — exactly as the real exam does."""
@@ -2120,7 +2161,7 @@ def _render_passage(q, quiz, idx):
                         "color:var(--ink-faint)'>PASSAGE</span>", unsafe_allow_html=True)
         elif q.get("passage_title"):
             st.markdown(f"**{q['passage_title']}**")
-        st.markdown(q["passage_body"])
+        _render_rich_markdown(q["passage_body"])
     if len(same) > 1 and idx in same:
         st.caption(f"Passage question {same.index(idx) + 1} of {len(same)} — "
                    "the passage stays visible for every question in the set.")
@@ -2232,9 +2273,10 @@ def _answer_input(q, key, prev=None):
         picked = [k for k, v in options.items()
                   if st.checkbox(f"{k}. {v}", value=(k in prev_set), key=f"{key}_{k}")]
         return ",".join(sorted(picked))
+    _render_option_visuals(options)
     idx = list(options).index(prev) if prev in options else 0
     return st.radio("Choose one:", list(options.keys()),
-                     format_func=lambda k: f"{k}. {options[k]}", index=idx, key=key)
+                     format_func=lambda k: _option_label(k, options[k]), index=idx, key=key)
 
 
 def _render_answer_review(q, chosen):
@@ -2266,12 +2308,13 @@ def _render_answer_review(q, chosen):
             st.markdown(f"{mark} **{k}. {v}** — you said **{your}**, correct is **{right}**")
         return
     for k, v in options.items():
+        label = _option_label(k, v)
         if k == q["correct"]:
-            st.markdown(f"✓ **{k}. {v}**")
+            st.markdown(f"✓ **{label}**")
         elif k == chosen:
-            st.markdown(f"✗ ~~{k}. {v}~~")
+            st.markdown(f"✗ ~~{label}~~")
         else:
-            st.markdown(f"&nbsp;&nbsp;&nbsp;{k}. {_esc(v)}", unsafe_allow_html=True)
+            st.markdown(f"&nbsp;&nbsp;&nbsp;{_esc(label)}", unsafe_allow_html=True)
 
 
 def page_practice():

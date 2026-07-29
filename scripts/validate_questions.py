@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import database as db
+from question_visuals import VISUALS, VISUAL_MARKER_RE
 
 
 FAILURES: list[str] = []
@@ -136,8 +137,11 @@ def check_structure_and_coverage() -> None:
         sets_by_code[passage_set[0]].append(passage_set)
     if len(sets_by_code["VR"]) != 11 or any(len(group[4]) != 4 for group in sets_by_code["VR"]):
         fail("[coverage] VR must contain 11 four-question passage sets")
-    if len(sets_by_code["QR"]) != 9 or any(len(group[4]) != 4 for group in sets_by_code["QR"]):
-        fail("[coverage] QR must contain 9 four-question data sets")
+    qr_standalone = [item for item in ITEMS if item.code == "QR" and item.passage_title is None]
+    if len(sets_by_code["QR"]) != 8 or any(len(group[4]) != 4 for group in sets_by_code["QR"]):
+        fail("[coverage] QR must contain 8 four-question data sets")
+    if len(qr_standalone) != 4:
+        fail(f"[coverage] QR must contain 4 standalone questions; found {len(qr_standalone)}")
     if len(sets_by_code["SJT"]) != 16 or any(not 1 <= len(group[4]) <= 6 for group in sets_by_code["SJT"]):
         fail("[coverage] SJT scenarios must contain 1–6 questions across 16 groups")
 
@@ -158,6 +162,12 @@ def check_structure_and_coverage() -> None:
     if (len(tfc_sets), len(mcq_sets)) != (4, 7):
         fail(f"[format] VR must have 4 pure T/F/CT sets and 7 pure MCQ sets; "
              f"found {(len(tfc_sets), len(mcq_sets))}")
+    if not any("EXCEPT" in item.stem for item in mcq):
+        fail("[coverage] VR MCQs need at least one negative EXCEPT stem")
+    if not any(item.stem.rstrip().endswith(":") for item in mcq):
+        fail("[coverage] VR MCQs need at least one incomplete-statement stem")
+    if not any(item.stem.startswith("According to") for item in mcq):
+        fail("[coverage] VR MCQs need at least one direct-retrieval stem")
     if len({group[2] for group in vr_sets}) != 11:
         fail("[dedup] VR passage titles must be unique")
     for _code, _topic, title, body, questions in vr_sets:
@@ -213,6 +223,34 @@ def check_structure_and_coverage() -> None:
             fail(f"[format] SJT rating scale is invalid in {item.stem[:50]!r}")
     if any(len(item.options) != 3 for item in rank):
         fail("[format] every SJT most/least item must contain three actions")
+
+    used_visuals: set[str] = set()
+    for _code, _topic, _title, body, questions in db._PASSAGE_SETS:
+        used_visuals.update(VISUAL_MARKER_RE.findall(body or ""))
+        for raw in questions:
+            unpacked = db._unpack_question(raw)
+            for value in unpacked[:6]:
+                used_visuals.update(VISUAL_MARKER_RE.findall(value or ""))
+    unknown_visuals = used_visuals - set(VISUALS)
+    if unknown_visuals:
+        fail(f"[visual] unknown visual markers: {sorted(unknown_visuals)}")
+    unused_visuals = set(VISUALS) - used_visuals
+    if unused_visuals:
+        fail(f"[visual] registry entries are unused: {sorted(unused_visuals)}")
+    for visual_id, visual in VISUALS.items():
+        if "<svg" not in visual.html or "aria-label=" not in visual.html:
+            fail(f"[visual] {visual_id} is missing accessible SVG structure")
+        if "<script" in visual.html.lower() or "http://" in visual.html.lower() or "https://" in visual.html.lower():
+            fail(f"[visual] {visual_id} must remain self-contained and script-free")
+
+    dm_visual_sets = [group for group in sets_by_code["DM"] if VISUAL_MARKER_RE.search(group[3] or "")
+                      or any(VISUAL_MARKER_RE.search(value or "")
+                             for raw in group[4] for value in db._unpack_question(raw)[:6])]
+    if len(dm_visual_sets) < 2:
+        fail(f"[coverage] DM has {len(dm_visual_sets)} visual set items; expected at least 2")
+    qr_visual_sets = [group for group in sets_by_code["QR"] if VISUAL_MARKER_RE.search(group[3] or "")]
+    if len(qr_visual_sets) < 5:
+        fail(f"[coverage] QR has {len(qr_visual_sets)} chart/graph sets; expected at least 5 of 8")
 
 
 def check_answer_balance() -> None:
@@ -338,10 +376,10 @@ def check_qr_math() -> None:
     winter_total = 80 * 720 * 0.08 * 0.94 + 120 * 720 * 0.10 * 0.92 + 95 * 720 * 0.09 * 0.95
     assert_numeric("average estimated winter output", round(winter_total / 30), "combined daily winter output")
 
-    assert_numeric("ordering 180 kg of apples", round(180 * 2.4 * 0.92 + 45, 2), "discounted apples")
-    assert_numeric("obtaining at least 120 kg", round(math.ceil(120 / 0.95) * 2.4 + 45, 2), "usable apples")
-    assert_numeric("250 kg of rice", 250 * 1.8 * 0.88 + 45, "discounted rice")
-    assert_numeric("obtaining at least 100 kg", round(math.ceil(100 / 0.98) * 7.5 * 0.95 + 45, 2), "usable cheese")
+    assert_numeric("walking route measures", round(14.8 * 25000 / 100000 * 1.08, 2), "map scale and diversion")
+    assert_numeric("tank contains 480 litres", round(200 / 450 * 100, 1), "mixture replacement")
+    assert_numeric("machine normally produces", 750 / 6 * 1.12 * 5 * 0.94, "upgraded usable output")
+    assert_numeric("recipe uses 1.2 kg", math.ceil((54 * 1.05 * 1.2 / 8) / 2), "whole flour bags")
 
 
 def assert_key(fragment: str, expected: str, note: str, code: str = "DM") -> None:
@@ -351,8 +389,6 @@ def assert_key(fragment: str, expected: str, note: str, code: str = "DM") -> Non
 
 
 def check_dm_numeric_and_arrangements() -> None:
-    assert_numeric("only first-aid certification", 68 - 25 - 22 + 8, "first-aid only", code="DM")
-    assert_numeric("study none of the three languages", 96 - (51 + 44 + 38 - 20 - 18 - 16 + 9), "three-set complement", code="DM")
     assert_numeric("exactly two of the services", (28 - 11) + (24 - 11) + (19 - 11), "exactly two sets", code="DM")
     exactly_one = (98 - 40 - 35 + 18) + (76 - 40 - 29 + 18) + (64 - 35 - 29 + 18)
     assert_numeric("exactly one of the three labels", exactly_one, "exactly one label", code="DM")
@@ -484,15 +520,19 @@ def check_dm_syllogism_models() -> None:
         ), {"C"})
 
     verify_models(
-        "Every coral marker", ("coral", "waterproof", "paper", "red"),
-        lambda m: _all(m, "coral", "waterproof") and _none(m, "waterproof", "paper") and _exists(m, "red", "coral"),
+        "Every instrument in a rehearsal cabinet", ("tuned", "repair", "labelled", "insured", "top"),
+        lambda m: (all(m["tuned"][i] != m["repair"][i] for i in range(len(m["tuned"])))
+                   and _all(m, "tuned", "labelled")
+                   and _exists(m, "labelled", negative=("tuned",))
+                   and _exists(m, "repair", "insured")
+                   and _none(m, "insured", "top")),
         (
-            lambda m: _exists(m, "red", "waterproof"),
-            lambda m: _none(m, "coral", "paper"),
-            lambda m: _all(m, "red", "coral"),
-            lambda m: _exists(m, "red", negative=("paper",)),
-            lambda m: all(m["paper"][i] or m["waterproof"][i] for i in range(len(m["paper"]))),
-        ), {"A", "B", "D"})
+            lambda m: sum(m["tuned"]) < sum(m["labelled"]),
+            lambda m: _exists(m, "insured", "labelled"),
+            lambda m: _none(m, "insured", "top"),
+            lambda m: _exists(m, "labelled", "repair"),
+            lambda m: sum(m["insured"]) > len(m["insured"]) / 2,
+        ), {"A", "C", "D"})
     verify_models(
         "All bronze passes", ("bronze", "h1", "h2", "temporary"),
         lambda m: _all(m, "bronze", "h1") and _exists(m, "h1", "h2") and _none(m, "temporary", "h2"),
@@ -561,6 +601,41 @@ def check_dm_syllogism_models() -> None:
     if grant_models:
         fail("[logic-model] contradictory grant facts unexpectedly have a satisfying model")
     assert_key("Every grant that is renewed", "D", "enumerated contradiction")
+
+
+def check_visual_logic() -> None:
+    """Independently verify the two visual DM keys and their set arithmetic."""
+    points = {"G": (120, 205), "M": (250, 160), "R": (330, 140), "P": (220, 265)}
+
+    def in_triangle(point, a=(240, 35), b=(430, 285), c=(90, 285)):
+        def sign(p1, p2, p3):
+            return ((p1[0] - p3[0]) * (p2[1] - p3[1])
+                    - (p2[0] - p3[0]) * (p1[1] - p3[1]))
+        d1, d2, d3 = sign(point, a, b), sign(point, b, c), sign(point, c, a)
+        has_negative = d1 < 0 or d2 < 0 or d3 < 0
+        has_positive = d1 > 0 or d2 > 0 or d3 > 0
+        return not (has_negative and has_positive)
+
+    triple = []
+    for label, (x, y) in points.items():
+        in_robotics = 35 <= x <= 270 and 85 <= y <= 235
+        in_orchestra = ((x - 290) / 150) ** 2 + ((y - 160) / 95) ** 2 <= 1
+        if in_robotics and in_orchestra and in_triangle((x, y)):
+            triple.append(label)
+    if triple != ["M"]:
+        fail(f"[visual-logic] workshop triple-overlap labels are {triple}, expected ['M']")
+    assert_key("Which labelled group attended robotics", "B", "independent shape-membership test")
+
+    ceramics_total, print_total, overlap, photography, neither = 11, 14, 5, 8, 6
+    regions = (ceramics_total - overlap, overlap, print_total - overlap, photography, neither)
+    if regions != (6, 5, 9, 8, 6):
+        fail(f"[visual-logic] makers' evening regions are {regions}")
+    venn_item = find("Which diagram correctly represents", "DM")
+    if venn_item is not None:
+        if venn_item.correct != "D":
+            fail(f"[visual-logic] makers' evening key is {venn_item.correct}, expected D")
+        if "[[VISUAL:dm_venn_d]]" not in venn_item.options[3]:
+            fail("[visual-logic] correct makers' evening option is not linked to diagram D")
 
 
 def check_live_seed_smoke_test() -> None:
@@ -652,6 +727,7 @@ def run() -> None:
     check_qr_math()
     check_dm_numeric_and_arrangements()
     check_dm_syllogism_models()
+    check_visual_logic()
     check_live_seed_smoke_test()
 
     print(f"Active seed bank size: {len(ITEMS)}")
@@ -662,7 +738,7 @@ def run() -> None:
             print(" -", failure)
         print("\nRESULT: FAIL")
         raise SystemExit(1)
-    print("RESULT: PASS — format, structure, balance, independent math, logic models, and seed migration checks passed.")
+    print("RESULT: PASS — format, structure, visual coverage, independent math, logic models, and seed migration checks passed.")
 
 
 if __name__ == "__main__":

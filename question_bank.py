@@ -267,7 +267,7 @@ It is tempting to describe the container as an autonomous technology that swept 
                 "Hard",
             ),
             _mcq(
-                "The final paragraph primarily challenges which interpretation?",
+                "Each of the following is supported by the final paragraph EXCEPT:",
                 [
                     "Some freight still requires specialised handling.",
                     "The container succeeded through technology alone and replaced every cargo system.",
@@ -275,7 +275,7 @@ It is tempting to describe the container as an autonomous technology that swept 
                     "Standardisation can coordinate separate transport networks.",
                 ],
                 "B",
-                "B is correct because the author rejects autonomous, universal technological replacement. A, C, and D are positions the paragraph supports rather than challenges.",
+                "B is correct because the paragraph rejects the claim that technology alone produced universal replacement. A, C, and D are all supported: some freight remains specialised, infrastructure affected adoption, and shared standards coordinated networks.",
                 "Medium",
             ),
             _mcq(
@@ -835,26 +835,6 @@ DM_STANDALONE_QUESTIONS = [
     (
         "DM", "Venn Diagrams & Sets",
         *_mcq(
-            "Among 120 staff, 68 hold first-aid certification, 54 hold fire-safety certification and 49 hold manual-handling certification. Inclusive overlaps are 25 first-aid/fire, 22 first-aid/manual and 20 fire/manual; 8 hold all three. How many hold only first-aid certification?",
-            ["21", "29", "37", "51"],
-            "B",
-            "B is correct: first-aid only = 68 − 25 − 22 + 8 = 29, adding the triple overlap back because it was subtracted twice. A omits adding back the triple; C subtracts only one pair overlap; D subtracts the triple rather than the pair overlaps.",
-            "Medium",
-        ),
-    ),
-    (
-        "DM", "Venn Diagrams & Sets",
-        *_mcq(
-            "In a group of 96 students, 51 study French, 44 study German and 38 study Spanish. Twenty study both French and German, 18 both French and Spanish, 16 both German and Spanish, and 9 study all three. How many study none of the three languages?",
-            ["6", "12", "10", "8"],
-            "D",
-            "D is correct: union = 51 + 44 + 38 − 20 − 18 − 16 + 9 = 88, so none = 96 − 88 = 8. A omits part of an overlap; B adds the triple overlap incorrectly; C subtracts the triple twice.",
-            "Hard",
-        ),
-    ),
-    (
-        "DM", "Venn Diagrams & Sets",
-        *_mcq(
             "A survey of 150 households found that 92 subscribe to a film service, 71 to a sports service and 63 to a documentary service. Twenty-eight subscribe to film and sports, 24 to film and documentary, 19 to sports and documentary, and 11 to all three. How many subscribe to exactly two of the services?",
             ["38", "49", "60", "71"],
             "A",
@@ -990,18 +970,55 @@ DM_STANDALONE_QUESTIONS = [
 ]
 
 
+DM_VISUAL_PASSAGE_SETS = [
+    (
+        "DM", "Venn Diagrams & Sets", "Community Skills Programme",
+        """Six workshops were offered at a community skills programme. Each outline in the diagram represents everyone who attended that workshop; overlaps represent attendance at more than one workshop.
+
+[[VISUAL:dm_workshop_regions]]""",
+        [
+            _mcq(
+                "Which labelled group attended robotics, orchestra and debating?",
+                ["Letter G", "Letter M", "Letter P", "Letter R"],
+                "B",
+                "B is correct because M lies inside the rectangle for robotics, the ellipse for orchestra, and the triangle for debating. A (G) is outside orchestra and debating; C (P) is outside robotics and orchestra; D (R) is outside the robotics rectangle even though it lies in the other outlined sets.",
+                "Hard",
+            ),
+        ],
+    ),
+    (
+        "DM", "Venn Diagrams & Sets", "Makers' Evening Registrations",
+        """At a makers' evening, 11 people joined ceramics and 14 joined printmaking. Of these, 5 joined both workshops. Eight different people joined photography; none of them joined ceramics or printmaking. A further 6 people joined no workshop and only used the café.""",
+        [
+            _mcq(
+                "Which diagram correctly represents the makers' evening registrations?",
+                [
+                    "Diagram A [[VISUAL:dm_venn_a]]",
+                    "Diagram B [[VISUAL:dm_venn_b]]",
+                    "Diagram C [[VISUAL:dm_venn_c]]",
+                    "Diagram D [[VISUAL:dm_venn_d]]",
+                ],
+                "D",
+                "D is correct: ceramics-only is 11 − 5 = 6, printmaking-only is 14 − 5 = 9, the overlap is 5, photography is a separate group of 8, and 6 sit outside every set. A puts the inclusive totals in exclusive regions; B swaps the photography and neither counts; C wrongly overlaps photography with another workshop.",
+                "Hard",
+            ),
+        ],
+    ),
+]
+
+
 DM_YESNO_QUESTIONS = [
     (
         "DM", "Syllogisms & Logical Deduction",
-        "Every coral marker is waterproof. No waterproof marker is made of paper. Some red markers are coral markers. For each conclusion, answer Yes only if it necessarily follows.",
-        "At least one red marker is waterproof.",
-        "No coral marker is made of paper.",
-        "Every red marker is a coral marker.",
-        "Some red markers are not made of paper.",
-        "Every non-paper marker is waterproof.",
-        "A,B,D",
-        "A Yes: the red coral marker is waterproof. B Yes: coral implies waterproof and waterproof excludes paper. C No: only some red markers are coral. D Yes: the same red coral marker cannot be paper. E No: the premises do not say all non-paper markers are waterproof.",
-        "Medium",
+        "Every instrument in a rehearsal cabinet is either tuned or awaiting repair, but not both. Every tuned instrument has a label, but not all labelled instruments are tuned. Some instruments awaiting repair are insured. No insured instrument is kept on the top shelf. For each conclusion, answer Yes only if it necessarily follows.",
+        "There are fewer tuned instruments than labelled instruments.",
+        "Some insured instrument has a label.",
+        "Every insured instrument is kept away from the top shelf.",
+        "At least one labelled instrument is awaiting repair.",
+        "Most instruments in the cabinet are insured.",
+        "A,C,D",
+        "A Yes: tuned instruments form a proper subset of labelled instruments because all tuned instruments are labelled and at least one labelled instrument is not tuned. B No: the known insured instrument awaiting repair need not be labelled. C Yes: this restates the final premise. D Yes: a labelled non-tuned instrument must be in the other exclusive cabinet group, awaiting repair. E No: the premises establish only that some repaired instruments are insured, not that a majority are.",
+        "Hard",
     ),
     (
         "DM", "Syllogisms & Logical Deduction",
@@ -1125,12 +1142,7 @@ QR_PASSAGE_SETS = [
         "QR", "Percentages & Percentage Change", "Household Water Use",
         """Monthly water charges are £8 plus tiered usage: the first 15 m³ costs £1.20 per m³, the next 15 m³ costs £1.65 per m³, and usage above 30 m³ costs £2.10 per m³. A £5 conservation rebate is deducted when monthly use is 20 m³ or less.
 
-| Household | April | May | June |
-|---|---:|---:|---:|
-| A | 18 m³ | 22 m³ | 31 m³ |
-| B | 12 m³ | 17 m³ | 24 m³ |
-| C | 26 m³ | 29 m³ | 35 m³ |
-| D | 15 m³ | 20 m³ | 28 m³ |""",
+[[VISUAL:qr_water_use]]""",
         [
             _mcq(
                 "What is Household C's water charge for June?",
@@ -1153,13 +1165,7 @@ QR_PASSAGE_SETS = [
         "QR", "Ratios & Proportion", "Travel-Money Exchange",
         """An exchange desk uses the following rates and charges. Calculations are rounded only at the final step.
 
-| Currency | Customer receives | Charge |
-|---|---:|---|
-| euro (€) | €1.16 per £1 | 1.5% of sterling exchanged, deducted before conversion |
-| Polish zloty (zł) | zł5.02 per £1 | £6 added to the sterling cost |
-| Danish krone (kr) | kr13.40 per £1 | 2% of the converted krone amount deducted |
-
-For unused euros, the desk pays £0.82 per €1 and then deducts a £4 return fee.""",
+[[VISUAL:qr_exchange_rates]]""",
         [
             _mcq(
                 "How many euros does a customer receive for exchanging £620?",
@@ -1182,12 +1188,7 @@ For unused euros, the desk pays £0.82 per €1 and then deducts a £4 return fe
         "QR", "Tables, Charts & Data", "Print Workshop Capacity",
         """Four printers have different setup times, speeds, waste rates and paper costs. Waste rate is the proportion of printed sheets that is unusable. Whole sheets must be printed. Setup occurs once per job.
 
-| Printer | Setup | Speed | Waste | Cost per printed sheet |
-|---|---:|---:|---:|---:|
-| A | 12 min | 38 sheets/min | 4% | £0.031 |
-| B | 18 min | 52 sheets/min | 7% | £0.028 |
-| C | 8 min | 44 sheets/min | 5% | £0.030 |
-| D | 6 min | 40 sheets/min | 3% | £0.032 |""",
+[[VISUAL:qr_printer_performance]]""",
         [
             _mcq(
                 "Using printer B, approximately how long does a job requiring 1,800 usable sheets take, including setup?",
@@ -1242,11 +1243,7 @@ A bicycle costs £6 per journey leg.""",
         "QR", "Tables, Charts & Data", "Community Fundraising Events",
         """Net proceeds equal ticket income plus sponsorship, less variable costs, fixed costs and a card fee of 2.4% of ticket income. The walk and quiz each receive sponsorship equal to 10% of ticket income. The concert receives fixed sponsorship of £1,200.
 
-| Event | Attendees | Ticket per person | Variable cost per person | Fixed cost |
-|---|---:|---:|---:|---:|
-| Walk | 320 | £12.00 | £3.20 | £650 |
-| Quiz | 180 | £18.00 | £5.00 | £900 |
-| Concert | 240 | £25.00 | £9.50 | £1,800 |""",
+[[VISUAL:qr_fundraising]]""",
         [
             _mcq(
                 "What are the concert's net proceeds?",
@@ -1269,11 +1266,7 @@ A bicycle costs £6 per journey leg.""",
         "QR", "Percentages & Percentage Change", "Solar-Site Output",
         """Estimated monthly energy is: installed capacity × 24 hours × 30 days × capacity factor × (1 − system loss).
 
-| Site | Installed capacity | Summer factor | Winter factor | System loss |
-|---|---:|---:|---:|---:|
-| A | 80 kW | 22% | 8% | 6% |
-| B | 120 kW | 18% | 10% | 8% |
-| C | 95 kW | 20% | 9% | 5% |""",
+[[VISUAL:qr_solar_factors]]""",
         [
             _mcq(
                 "What is Site A's estimated summer output, to the nearest kWh?",
@@ -1292,33 +1285,50 @@ A bicycle costs £6 per journey leg.""",
                 ["575 kWh", "604 kWh", "621 kWh", "649 kWh", "666 kWh"], "B",
                 "B is correct: monthly winter outputs are 4,331.52, 7,948.8 and 5,848.2 kWh; total 18,128.52/30 = 604.28 kWh per day. A applies all losses as 10%; C omits Site A's loss; D divides by 28 days; E omits losses.", "Hard"),
         ]),
-    (
-        "QR", "Ratios & Proportion", "Food Cooperative Orders",
-        """The cooperative pays a £45 delivery charge for each product order. Supplier discounts apply to the product cost before delivery. Apples lose 5% of ordered weight during sorting; cheese loses 2%. Orders are placed in whole kilograms.
+]
 
-| Product | Price per kg | Discount threshold | Discount |
-|---|---:|---:|---:|
-| Apples | £2.40 | 150 kg or more | 8% |
-| Rice | £1.80 | 200 kg or more | 12% |
-| Cheese | £7.50 | 80 kg or more | 5% |""",
-        [
-            _mcq(
-                "What is the delivered cost of ordering 180 kg of apples?",
-                ["£397.44", "£432.00", "£442.44", "£466.20", "£477.00"], "C",
-                "C is correct: 180×£2.40×0.92 + £45 = £442.44. A omits delivery; B omits both discount and delivery; D applies discount only to delivery; E ignores discount.", "Medium"),
-            _mcq(
-                "What is the minimum delivered cost of obtaining at least 120 kg of usable apples?",
-                ["£333.60", "£345.00", "£349.20", "£349.80", "£357.00"], "D",
-                "D is correct: ceil(120/0.95)=127 kg; this is below the discount threshold, so 127×£2.40 + £45 = £349.80. A ignores waste; B rounds ordered weight down; C uses 126.75 kg despite whole-kg ordering; E orders 130 kg.", "Hard"),
-            _mcq(
-                "What is the delivered cost of 250 kg of rice?",
-                ["£396.00", "£405.00", "£420.00", "£432.00", "£441.00"], "E",
-                "E is correct: 250×£1.80×0.88 + £45 = £441. A omits delivery; B applies a 10% discount; C deducts £30 rather than 12%; D applies discount to delivery too.", "Medium"),
-            _mcq(
-                "What is the minimum delivered cost of obtaining at least 100 kg of usable cheese?",
-                ["£778.88", "£757.50", "£772.50", "£785.63", "£817.50"], "A",
-                "A is correct: ceil(100/0.98)=103 kg; 103×£7.50×0.95 + £45 = £778.875, or £778.88. B ignores waste and delivery; C ignores waste; D rounds the required weight before dividing; E ignores the discount.", "Hard"),
-        ]),
+
+QR_STANDALONE_QUESTIONS = [
+    (
+        "QR", "Ratios & Proportion",
+        *_mcq(
+            "A walking route measures 14.8 cm on a map with scale 1:25,000. A temporary diversion makes the real route 8% longer. What is the diverted route length to the nearest 0.01 km?",
+            ["3.70 km", "3.85 km", "4.00 km", "4.28 km", "39.96 km"],
+            "C",
+            "C is correct: 14.8×25,000 = 370,000 cm = 3.70 km, then 3.70×1.08 = 3.996 km, which rounds to 4.00 km. A omits the diversion; B adds only 4%; D uses an incorrect scale conversion; E fails to convert metres to kilometres.",
+            "Medium",
+        ),
+    ),
+    (
+        "QR", "Ratios & Proportion",
+        *_mcq(
+            "A tank contains 480 litres of fruit drink in a juice-to-water ratio of 3:5. Eighty litres of the mixture is removed, then 50 litres of pure juice is added. What percentage of the final mixture is juice, to 1 decimal place?",
+            ["37.5%", "41.7%", "42.2%", "44.4%", "50.0%"],
+            "D",
+            "D is correct: the tank starts with 180 litres of juice; removing 80 litres in the same ratio removes 30 litres of juice, leaving 150. Adding 50 gives 200 litres of juice in 450 litres, or 44.4%. A ignores the added juice; B uses 480 as the final total; C removes the wrong share; E assumes equal quantities.",
+            "Hard",
+        ),
+    ),
+    (
+        "QR", "Ratios & Proportion",
+        *_mcq(
+            "A machine normally produces 750 components in 6 hours. After an upgrade its hourly output rises by 12%, but 6% of all components produced are rejected. How many usable components does it produce in 5 hours?",
+            ["588", "625", "630", "644", "658"],
+            "E",
+            "E is correct: the original rate is 750/6 = 125 per hour; increasing this by 12% gives 140 per hour, so 700 are made in 5 hours and 94% are usable: 700×0.94 = 658. A applies both percentages as reductions; B ignores the upgrade; C deducts 10%; D rejects 8%.",
+            "Medium",
+        ),
+    ),
+    (
+        "QR", "Ratios & Proportion",
+        *_mcq(
+            "A recipe uses 1.2 kg of flour for 8 portions. A caterer must prepare 54 portions plus 5% extra for wastage. Flour is sold only in 2 kg bags. What is the minimum number of bags required?",
+            ["5 bags", "4 bags", "6 bags", "7 bags", "9 bags"],
+            "A",
+            "A is correct: each portion uses 1.2/8 = 0.15 kg; allowing 5% extra gives 54×1.05×0.15 = 8.505 kg, so five 2 kg bags are required. B leaves insufficient flour; C and D round up the bag count more than necessary; E confuses kilograms required with bags.",
+            "Hard",
+        ),
+    ),
 ]
 
 
@@ -1685,5 +1695,19 @@ SJT_PASSAGE_SETS.extend([
 ])
 
 
-PASSAGE_SETS = list(VR_PASSAGE_SETS) + list(QR_PASSAGE_SETS) + list(SJT_PASSAGE_SETS)
-STANDALONE_QUESTIONS = list(DM_STANDALONE_QUESTIONS)
+PASSAGE_SETS = (list(VR_PASSAGE_SETS) + list(DM_VISUAL_PASSAGE_SETS)
+                + list(QR_PASSAGE_SETS) + list(SJT_PASSAGE_SETS))
+STANDALONE_QUESTIONS = list(DM_STANDALONE_QUESTIONS) + list(QR_STANDALONE_QUESTIONS)
+
+# Stems removed from a previously shipped version of this authored bank.  The
+# migration retires rather than deletes them so historical attempts remain
+# intact while the exact active mock counts do not grow after deployment.
+RETIRED_QUESTION_STEMS = {
+    "Among 120 staff, 68 hold first-aid certification, 54 hold fire-safety certification and 49 hold manual-handling certification. Inclusive overlaps are 25 first-aid/fire, 22 first-aid/manual and 20 fire/manual; 8 hold all three. How many hold only first-aid certification?",
+    "In a group of 96 students, 51 study French, 44 study German and 38 study Spanish. Twenty study both French and German, 18 both French and Spanish, 16 both German and Spanish, and 9 study all three. How many study none of the three languages?",
+    "Every coral marker is waterproof. No waterproof marker is made of paper. Some red markers are coral markers. For each conclusion, answer Yes only if it necessarily follows.",
+    "What is the delivered cost of ordering 180 kg of apples?",
+    "What is the minimum delivered cost of obtaining at least 120 kg of usable apples?",
+    "What is the delivered cost of 250 kg of rice?",
+    "What is the minimum delivered cost of obtaining at least 100 kg of usable cheese?",
+}
