@@ -79,6 +79,11 @@ import streamlit.components.v1 as components
 import pandas as pd
 import plotly.graph_objects as go
 
+_YES_NO_DROP = components.declare_component(
+    "ucatify_yes_no_drop",
+    path=str(Path(__file__).parent / "components" / "yes_no_drop"),
+)
+
 try:
     import anthropic
     _HAS_ANTHROPIC = True
@@ -2267,12 +2272,16 @@ def _answer_input(q, key, prev=None):
         )
         return f"{most},{least}"
     if _is_multi(q):
-        st.caption("For each statement, check the box if it **follows** from the information above "
-                   "(Yes). Leave it unchecked if it does not follow (No). More than one may be correct.")
-        prev_set = {x for x in (prev or "").split(",") if x}
-        picked = [k for k, v in options.items()
-                  if st.checkbox(f"{k}. {v}", value=(k in prev_set), key=f"{key}_{k}")]
-        return ",".join(sorted(picked))
+        result = _YES_NO_DROP(
+            statements=[{"letter": letter, "text": wording} for letter, wording in options.items()],
+            previous=prev,
+            widget_id=key,
+            key=f"{key}_yes_no_drop",
+            default=None,
+        )
+        if isinstance(result, dict) and result.get("complete"):
+            return result.get("yes", "")
+        return None
     _render_option_visuals(options)
     idx = list(options).index(prev) if prev in options else 0
     return st.radio("Choose one:", list(options.keys()),
@@ -2416,7 +2425,8 @@ def page_practice():
 
         if answered is None:
             choice = _answer_input(q, key=f"q_{idx}")
-            if st.button("Submit answer", type="primary"):
+            if st.button("Submit answer", type="primary",
+                         disabled=_is_multi(q) and choice is None):
                 is_correct = _is_correct(q, choice)
                 elapsed = datetime.now().timestamp() - ss.get("quiz_start", datetime.now().timestamp())
                 elapsed = round(elapsed, 1)
@@ -4379,14 +4389,15 @@ def page_mock():
         ss["mock_idx"] += 1
         _save_mock_progress(ss)
         st.rerun()
-    if nav[2].button("Save & next ▶", type="primary"):
+    if nav[2].button("Save & next ▶", type="primary",
+                     disabled=_is_multi(q) and choice is None):
         ss["mock_answers"][idx] = choice
         ss["mock_times"][idx] = round(datetime.now().timestamp() - ss["mock_q_start"].get(idx, datetime.now().timestamp()), 1)
         ss["mock_idx"] += 1
         _save_mock_progress(ss)
         st.rerun()
     if nav[3].button("Finish & grade"):
-        if choice:
+        if choice is not None:
             ss["mock_answers"][idx] = choice
             ss["mock_times"][idx] = round(datetime.now().timestamp() - ss["mock_q_start"].get(idx, datetime.now().timestamp()), 1)
         _finish_mock(ss, elapsed)

@@ -49,7 +49,12 @@ def collect_items() -> list[SeedItem]:
         for raw in questions:
             stem, a, b, c, d, e, correct, explanation, difficulty = db._unpack_question(raw)
             options = tuple(value for value in (a, b, c, d, e) if value)
-            fmt = "rank" if code == "SJT" and "," in correct else "single"
+            if code == "SJT" and "," in correct:
+                fmt = "rank"
+            elif code == "DM" and title in db._DM_MULTI_PASSAGE_TITLES:
+                fmt = "multi"
+            else:
+                fmt = "single"
             items.append(SeedItem(code, topic, stem, options, correct, explanation,
                                   difficulty, fmt, title, body))
     for row in db._STANDALONE_QUESTIONS:
@@ -205,6 +210,20 @@ def check_structure_and_coverage() -> None:
     missing_dm = required_dm_topics - {item.topic for item in dm_items}
     if missing_dm:
         fail(f"[coverage] missing DM varieties: {sorted(missing_dm)}")
+    required_dm_sets = {
+        "Annual Tutor Photograph", "Festival Supper Choices",
+        "Community Project Volunteers", "Commuter Reliability Study",
+        "Holiday Booking Survey",
+    }
+    dm_set_titles = {group[2] for group in sets_by_code["DM"]}
+    missing_dm_sets = required_dm_sets - dm_set_titles
+    if missing_dm_sets:
+        fail(f"[coverage] missing official-style DM stimulus formats: {sorted(missing_dm_sets)}")
+    passage_multi = [item for item in dm_multi if item.passage_title]
+    if len(passage_multi) != 1 or passage_multi[0].passage_title != "Commuter Reliability Study":
+        fail("[format] DM must include the table-based, passage-linked five-statement Yes/No item")
+    if "| Intervention |" not in (passage_multi[0].passage_body or ""):
+        fail("[format] the passage-linked DM Yes/No item is missing its data table")
 
     qr_items = [item for item in ITEMS if item.code == "QR"]
     if any(len(item.options) != 5 for item in qr_items):
@@ -242,6 +261,12 @@ def check_structure_and_coverage() -> None:
             fail(f"[visual] {visual_id} is missing accessible SVG structure")
         if "<script" in visual.html.lower() or "http://" in visual.html.lower() or "https://" in visual.html.lower():
             fail(f"[visual] {visual_id} must remain self-contained and script-free")
+    required_dm_visuals = {
+        "dm_seating_row", "dm_shapes_a", "dm_shapes_b", "dm_shapes_c", "dm_shapes_d",
+    }
+    if not required_dm_visuals <= used_visuals:
+        fail(f"[coverage] missing DM seating/compound-region visuals: "
+             f"{sorted(required_dm_visuals - used_visuals)}")
 
     dm_visual_sets = [group for group in sets_by_code["DM"] if VISUAL_MARKER_RE.search(group[3] or "")
                       or any(VISUAL_MARKER_RE.search(value or "")
@@ -390,28 +415,61 @@ def assert_key(fragment: str, expected: str, note: str, code: str = "DM") -> Non
 
 def check_dm_numeric_and_arrangements() -> None:
     assert_numeric("exactly two of the services", (28 - 11) + (24 - 11) + (19 - 11), "exactly two sets", code="DM")
-    exactly_one = (98 - 40 - 35 + 18) + (76 - 40 - 29 + 18) + (64 - 35 - 29 + 18)
-    assert_numeric("exactly one of the three labels", exactly_one, "exactly one label", code="DM")
     chess_only = 47 - 19
     assert_numeric("How many play tennis", chess_only + 13 + 19, "tennis total", code="DM")
     assert_option_text("both are the same colour", ("19/66",), "combination probability", code="DM")
     assert_numeric("one positive result", round(180 / (180 + 80) * 100, 1), "conditional probability", code="DM")
     assert_numeric("overall probability of winning", 0.4 * 0.75 + 0.6 * 0.20, "total probability", code="DM")
     assert_numeric("highest percentage resolved", 442 / 520 * 100, "best target rate", code="DM")
-    assert_option_text("reaches Westport at 08:22", ("Train B",), "earliest boardable arrival", code="DM")
     assert_numeric("present after Wednesday's returns", (240 * 0.75 + 45) * (2 / 3) + 12, "inventory sequence", code="DM")
     assert_numeric("12 of 300 people", (18 / 300 - 12 / 300) * 100, "percentage-point difference", code="DM")
 
-    talks = [tuple(text.split(", ")) for text in [
-        "J, N, M, K, L", "M, K, L, N, J", "N, J, M, K, L", "J, L, N, M, K"]]
-    def valid_talk(order: tuple[str, ...]) -> bool:
+    seating_models = []
+    for order in itertools.permutations("ABCDEFGH"):
         pos = {name: order.index(name) for name in order}
-        return (pos["J"] < pos["L"] and pos["K"] == pos["M"] + 1
-                and pos["N"] not in {0, 4} and abs(pos["L"] - pos["K"]) != 1)
-    valid_letters = ["ABCD"[i] for i, order in enumerate(talks) if valid_talk(order)]
-    if valid_letters != ["D"]:
-        fail(f"[logic] talk schedules have valid options {valid_letters}, expected D")
-    assert_key("Five talks—J", "D", "enumerated talk schedules")
+        if pos["E"] != 4 or {pos["B"], pos["H"]} != {3, 5}:
+            continue
+        if pos["A"] not in ({0} if pos["B"] > 3 else {7}):
+            continue
+        if abs(pos["C"] - pos["H"]) != 1 or abs(pos["G"] - pos["H"]) != 3:
+            continue
+        if abs(pos["D"] - pos["B"]) == 1 or abs(pos["D"] - pos["F"]) == 1:
+            continue
+        seating_models.append(pos)
+    seating_claims = (
+        lambda m: m["A"] == 0,
+        lambda m: abs(m["D"] - m["F"]) == 1,
+        lambda m: abs(m["G"] - m["H"]) == 1,
+        lambda m: m["F"] == 7,
+    )
+    seating_must = ["ABCD"[i] for i, claim in enumerate(seating_claims)
+                    if seating_models and all(claim(model) for model in seating_models)]
+    if len(seating_models) != 2 or seating_must != ["A"]:
+        fail(f"[logic] seating produced {len(seating_models)} models and MUST options {seating_must}")
+    assert_key("Which one of the following statements MUST", "A", "enumerated tutor seating")
+
+    recorded_mains = Counter(("pasta", "fish", "fish", "pasta"))
+    recorded_drinks = Counter(("tea", "juice", "tea", "juice"))
+    remaining_main = Counter({"pasta": 2, "fish": 2, "curry": 1}) - recorded_mains
+    remaining_drink = Counter({"coffee": 1, "tea": 2, "juice": 2}) - recorded_drinks
+    if remaining_main != Counter({"curry": 1}) or remaining_drink != Counter({"coffee": 1}):
+        fail(f"[logic] supper remainders are {remaining_main} and {remaining_drink}")
+    assert_key("Which combination of main course", "D", "independent inventory subtraction")
+
+    departments = {
+        "Outreach": (2, 2), "Research": (2, 2), "Logistics": (2, 2),
+        "Design": (2, 2), "Administration": (2, 3),
+    }
+    fixed_men = sum(men for name, (men, _women) in departments.items() if name != "Administration")
+    fixed_women = sum(women for name, (_men, women) in departments.items() if name != "Administration")
+    if (10 - fixed_men, 10 - fixed_women) != (2, 2):
+        fail("[logic] volunteer totals do not force two men and two women from Administration")
+    assert_key("Which volunteers must take the selection task", "C", "department and gender totals")
+
+    commuter_truths = {"A", "C", "E"}
+    commuter_matches = [item for item in ITEMS if item.passage_title == "Commuter Reliability Study"]
+    if len(commuter_matches) != 1 or set(commuter_matches[0].correct.split(",")) != commuter_truths:
+        fail("[logic] commuter table conclusions are not keyed A, C and E")
 
     colours = ("blue", "green", "red", "white")
     delivery_models = []
@@ -445,15 +503,6 @@ def check_dm_numeric_and_arrangements() -> None:
         fail(f"[logic] book arrangements have valid options {valid_books_letters}, expected B")
     assert_key("Six books—F", "B", "enumerated book arrangements")
 
-    proposals = [set(option) for option in (("A", "B", "D"), ("A", "C", "E"), ("B", "C", "D"), ("B", "D", "E"))]
-    def valid_proposals(chosen: set[str]) -> bool:
-        return (len(chosen) == 3 and ("A" not in chosen or "B" in chosen)
-                and not {"C", "D"} <= chosen and bool({"D", "E"} & chosen)
-                and ("E" not in chosen or "C" in chosen))
-    valid_proposal_letters = ["ABCD"[i] for i, chosen in enumerate(proposals) if valid_proposals(chosen)]
-    if valid_proposal_letters != ["A"]:
-        fail(f"[logic] proposal selections have valid options {valid_proposal_letters}, expected A")
-    assert_key("panel selects exactly three", "A", "enumerated proposal selections")
 
 
 def _all(model: dict[str, tuple[bool, ...]], left: str, right: str) -> bool:
@@ -573,17 +622,6 @@ def check_dm_syllogism_models() -> None:
             lambda m: _all(m, "booking", "evening"),
             lambda m: _none(m, "outdoor", "evening"),
         ), {"A", "B", "C", "E"})
-    verify_models(
-        "Every ceramic sample", ("ceramic", "fragile", "insured", "z", "blue"),
-        lambda m: _all(m, "ceramic", "fragile") and _exists(m, "fragile", "insured") and _none(m, "insured", "z") and _all(m, "blue", "z"),
-        (
-            lambda m: _none(m, "blue", "insured"),
-            lambda m: _exists(m, "fragile", negative=("z",)),
-            lambda m: _all(m, "ceramic", "insured"),
-            lambda m: _exists(m, "insured", "fragile"),
-            lambda m: _none(m, "ceramic", "blue"),
-        ), {"A", "B", "D"})
-
     parcel_valid = []
     for courier_x, courier_y, after_tuesday in itertools.product((False, True), repeat=3):
         if courier_x != courier_y and (not courier_y or after_tuesday) and not after_tuesday:
@@ -604,7 +642,7 @@ def check_dm_syllogism_models() -> None:
 
 
 def check_visual_logic() -> None:
-    """Independently verify the two visual DM keys and their set arithmetic."""
+    """Independently verify the visual DM keys, geometry and set arithmetic."""
     points = {"G": (120, 205), "M": (250, 160), "R": (330, 140), "P": (220, 265)}
 
     def in_triangle(point, a=(240, 35), b=(430, 285), c=(90, 285)):
@@ -636,6 +674,51 @@ def check_visual_logic() -> None:
             fail(f"[visual-logic] makers' evening key is {venn_item.correct}, expected D")
         if "[[VISUAL:dm_venn_d]]" not in venn_item.options[3]:
             fail("[visual-logic] correct makers' evening option is not linked to diagram D")
+
+    shape_regions = {
+        "A": (7, 3, 4, 0, 4, 2, 6, 4),
+        "B": (4, 3, 5, 1, 6, 2, 6, 3),
+        "C": (6, 1, 5, 3, 4, 2, 6, 3),
+        "D": (6, 3, 5, 1, 4, 2, 6, 3),
+    }
+    valid_shape_options = []
+    for letter, (p_only, t_only, c_only, pt, pc, tc, triple, outside) in shape_regions.items():
+        total = p_only + t_only + c_only + pt + pc + tc + triple + outside
+        planning_total = p_only + pt + pc + triple
+        planning_not_triangle = p_only + pc
+        ratio_matches = planning_not_triangle > 0 and pc * 5 == planning_not_triangle * 2
+        if total == 30 and planning_total == 17 and triple == 6 and ratio_matches:
+            valid_shape_options.append(letter)
+    if valid_shape_options != ["D"]:
+        fail(f"[visual-logic] compound survey diagrams valid options are {valid_shape_options}")
+    survey_item = find("Which diagram could correctly represent all", "DM")
+    if survey_item is not None:
+        if survey_item.correct != "D":
+            fail(f"[visual-logic] holiday survey key is {survey_item.correct}, expected D")
+        for index, letter in enumerate("ABCD"):
+            if f"[[VISUAL:dm_shapes_{letter.lower()}]]" not in survey_item.options[index]:
+                fail(f"[visual-logic] holiday survey option {letter} has the wrong diagram marker")
+
+
+def check_yes_no_component() -> None:
+    """Guard the interaction contract used by all five-statement DM items."""
+    component_path = ROOT / "components" / "yes_no_drop" / "index.html"
+    if not component_path.is_file():
+        fail("[component] the DM Yes/No placement component is missing")
+        return
+    source = component_path.read_text(encoding="utf-8")
+    required_contracts = {
+        'draggable="true"': "draggable Yes/No source tiles",
+        'addEventListener("drop"': "native drag-and-drop handling",
+        'addEventListener("pointerdown"': "pointer/touch drag handling",
+        'addEventListener("mouseup"': "mouse drag fallback",
+        'streamlit:setComponentValue': "Streamlit answer-value reporting",
+        'state.statements.every': "all-five-statements completion gating",
+        'aria-label': "accessible answer controls",
+    }
+    for token, purpose in required_contracts.items():
+        if token not in source:
+            fail(f"[component] Yes/No widget is missing {purpose}")
 
 
 def check_live_seed_smoke_test() -> None:
@@ -728,6 +811,7 @@ def run() -> None:
     check_dm_numeric_and_arrangements()
     check_dm_syllogism_models()
     check_visual_logic()
+    check_yes_no_component()
     check_live_seed_smoke_test()
 
     print(f"Active seed bank size: {len(ITEMS)}")

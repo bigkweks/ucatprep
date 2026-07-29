@@ -103,6 +103,53 @@ def _venn_option(label: str, *, left: int, overlap: int, right: int, separate: i
     )
 
 
+def _dm_seating_row() -> QuestionVisual:
+    parts = [
+        '<text x="20" y="28" class="title">Annual tutor photograph</text>',
+        '<text x="20" y="49" class="sub">Eight seats face the camera. Seat numbers run from left to right.</text>',
+    ]
+    for index in range(8):
+        x = 31 + index * 86
+        parts.append(f'<text x="{x+34}" y="76" text-anchor="middle" class="axis">{index+1}</text>')
+        parts.append(f'<rect x="{x}" y="86" width="68" height="61" rx="10" fill="#fff" stroke="#315f7d" stroke-width="2"/>')
+        if index == 4:
+            parts.append(f'<text x="{x+34}" y="111" text-anchor="middle" class="value">Dr Evans</text>')
+            parts.append(f'<text x="{x+34}" y="128" text-anchor="middle" class="axis">fixed seat</text>')
+    parts.extend([
+        '<path d="M330 193h98v35h-98z" fill="#d9d5ce" stroke="#68645d"/>',
+        '<path d="M350 193l10-12h38l10 12" fill="#ece9e2" stroke="#68645d"/>',
+        '<circle cx="379" cy="210" r="8" fill="#fbfaf7" stroke="#68645d"/>',
+        '<text x="379" y="250" text-anchor="middle" class="label">Camera</text>',
+    ])
+    return QuestionVisual(
+        _document("Eight numbered seats in a row with Dr Evans fixed in seat five and a camera in front", "\n".join(parts), "0 0 760 270"),
+        330,
+        "Eight-seat photograph layout",
+    )
+
+
+def _compound_shape_option(label: str, *, p_only: int, w_only: int, c_only: int,
+                           pw: int, pc: int, wc: int, triple: int, outside: int) -> QuestionVisual:
+    svg = f"""
+<rect x="8" y="8" width="284" height="218" rx="5" fill="#fff" stroke="#8f8a82"/>
+<polygon points="30,80 90,25 175,55 180,175 45,195" fill="#6d9fbe" fill-opacity=".12" stroke="#315f7d" stroke-width="2"/>
+<polygon points="95,35 260,195 65,195" fill="#d99978" fill-opacity=".12" stroke="#b85c44" stroke-width="2"/>
+<circle cx="190" cy="130" r="72" fill="#79ad89" fill-opacity=".12" stroke="#47815f" stroke-width="2"/>
+<g text-anchor="middle" class="value">
+  <text x="80" y="104">{p_only}</text><text x="150" y="194">{w_only}</text><text x="226" y="112">{c_only}</text>
+  <text x="100" y="124">{pw}</text><text x="160" y="82">{pc}</text><text x="194" y="175">{wc}</text>
+  <circle cx="150" cy="132" r="14" fill="#fff" fill-opacity=".88"/><text x="150" y="136">{triple}</text>
+  <text x="258" y="37">{outside}</text>
+</g>
+<g class="axis"><text x="24" y="218">Pentagon</text><text x="114" y="218">Triangle</text><text x="213" y="218">Circle</text></g>
+"""
+    return QuestionVisual(
+        _document(f"Diagram {label}: overlapping pentagon, triangle and circle with regional counts", svg, "0 0 300 235"),
+        315,
+        f"Diagram {label}",
+    )
+
+
 def _water_line_chart() -> QuestionVisual:
     values = {"A": [18, 22, 31], "B": [12, 17, 24], "C": [26, 29, 35], "D": [15, 20, 28]}
     colors = {"A": "#315f7d", "B": "#b85c44", "C": "#47815f", "D": "#8a6cac"}
@@ -221,10 +268,15 @@ def _solar_chart() -> QuestionVisual:
 
 VISUALS: dict[str, QuestionVisual] = {
     "dm_workshop_regions": _dm_region_map(),
+    "dm_seating_row": _dm_seating_row(),
     "dm_venn_a": _venn_option("A", left=11, overlap=5, right=14, separate=8, outside=6),
     "dm_venn_b": _venn_option("B", left=6, overlap=5, right=9, separate=6, outside=8),
     "dm_venn_c": _venn_option("C", left=6, overlap=5, right=9, separate=8, outside=6, separate_overlaps=True),
     "dm_venn_d": _venn_option("D", left=6, overlap=5, right=9, separate=8, outside=6),
+    "dm_shapes_a": _compound_shape_option("A", p_only=7, w_only=3, c_only=4, pw=0, pc=4, wc=2, triple=6, outside=4),
+    "dm_shapes_b": _compound_shape_option("B", p_only=4, w_only=3, c_only=5, pw=1, pc=6, wc=2, triple=6, outside=3),
+    "dm_shapes_c": _compound_shape_option("C", p_only=6, w_only=1, c_only=5, pw=3, pc=4, wc=2, triple=6, outside=3),
+    "dm_shapes_d": _compound_shape_option("D", p_only=6, w_only=3, c_only=5, pw=1, pc=4, wc=2, triple=6, outside=3),
     "qr_water_use": _water_line_chart(),
     "qr_exchange_rates": _exchange_rate_chart(),
     "qr_printer_performance": _printer_chart(),

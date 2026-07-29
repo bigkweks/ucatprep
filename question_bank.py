@@ -695,21 +695,6 @@ DM_STANDALONE_QUESTIONS = [
     (
         "DM", "Logic Puzzles & Arrangements",
         *_mcq(
-            "Five talks—J, K, L, M and N—are scheduled one per slot from 1 to 5. J is earlier than L. K is immediately after M. N is not in slot 1 or 5. L is not adjacent to K. Which schedule could be valid?",
-            [
-                "J, N, M, K, L",
-                "M, K, L, N, J",
-                "N, J, M, K, L",
-                "J, L, N, M, K",
-            ],
-            "D",
-            "D satisfies J before L, the M–K block, N in an interior slot, and non-adjacency of L and K. A places L adjacent to K; B puts J after L; C places N in slot 1 and also L adjacent to K.",
-            "Medium",
-        ),
-    ),
-    (
-        "DM", "Logic Puzzles & Arrangements",
-        *_mcq(
             "Four deliveries—P, Q, R and S—use different vans: blue, green, red and white. P is not blue or white. Q uses green or white. R does not use red. S uses blue. Which statement must be true?",
             [
                 "P uses green.",
@@ -745,16 +730,6 @@ DM_STANDALONE_QUESTIONS = [
             "B",
             "B satisfies F before H, keeps J immediately before K, puts G at an end, and separates L from H. A has F after H and L next to H; C has F after H; D reverses the J–K block.",
             "Medium",
-        ),
-    ),
-    (
-        "DM", "Logic Puzzles & Arrangements",
-        *_mcq(
-            "A panel selects exactly three of five proposals: A, B, C, D and E. If A is selected, B is selected. C and D cannot both be selected. At least one of D or E is selected. If E is selected, C is selected. Which selection is possible?",
-            ["A, B, D", "A, C, E", "B, C, D", "B, D, E"],
-            "A",
-            "A is possible: selecting A includes B, C and D are not both present, and D satisfies the final condition. B omits the B required by A; C selects incompatible C and D; D selects E without the required C.",
-            "Hard",
         ),
     ),
     (
@@ -845,16 +820,6 @@ DM_STANDALONE_QUESTIONS = [
     (
         "DM", "Venn Diagrams & Sets",
         *_mcq(
-            "A warehouse has 180 parcels. Ninety-eight are fragile, 76 are express and 64 are insured. Forty are fragile and express, 35 are fragile and insured, 29 are express and insured, and 18 have all three labels. How many have exactly one of the three labels?",
-            ["48", "60", "84", "72"],
-            "C",
-            "C is correct: fragile-only 41, express-only 25, insured-only 18, totalling 84. A forgets to add the triple overlap back within each only-region; B counts only two categories; D undercounts the insured-only region.",
-            "Hard",
-        ),
-    ),
-    (
-        "DM", "Venn Diagrams & Sets",
-        *_mcq(
             "Every member of a club plays chess, tennis, or both. Of 84 members, 47 play chess. There are 13 more tennis-only players than chess-only players, and 19 play both. How many play tennis?",
             ["50", "56", "60", "69"],
             "C",
@@ -920,16 +885,6 @@ DM_STANDALONE_QUESTIONS = [
     (
         "DM", "Interpreting Information",
         *_mcq(
-            "Four trains leave Westport for Eastbay. Train A leaves 08:10 and takes 74 minutes. B leaves 08:25 and takes 61 minutes. C leaves 08:40 and takes 55 minutes. D leaves 08:50 and takes 48 minutes. A passenger reaches Westport at 08:22 and needs 4 minutes to board. Which available train arrives first?",
-            ["Train A", "Train D", "Train C", "Train B"],
-            "D",
-            "D is available after boarding and arrives at 09:26. A cannot be boarded; C arrives 09:35; B arrives 09:38. The shortest journey is not the earliest arrival.",
-            "Medium",
-        ),
-    ),
-    (
-        "DM", "Interpreting Information",
-        *_mcq(
             "A shop begins with 240 units. On Monday it sells 25% of the opening stock. On Tuesday it receives 45 units, then sells one third of the stock then available. On Wednesday 12 returned units are added. How many units are present after Wednesday's returns?",
             ["132", "150", "162", "177"],
             "C",
@@ -970,7 +925,153 @@ DM_STANDALONE_QUESTIONS = [
 ]
 
 
-DM_VISUAL_PASSAGE_SETS = [
+DM_PASSAGE_SETS = [
+    (
+        "DM", "Logic Puzzles & Arrangements", "Annual Tutor Photograph",
+        """Eight tutors sit in a single row for a college photograph.
+
+- Dr Evans sits fifth from the left, with Dr Bell and Dr Hall occupying the two seats immediately beside her.
+- Dr Ash sits as far from Dr Bell as possible.
+- Dr Chen sits next to Dr Hall.
+- Dr Diaz does not sit beside Dr Bell or Dr Frost.
+- Dr Green sits three seats away from Dr Hall.
+
+[[VISUAL:dm_seating_row]]""",
+        [
+            _mcq(
+                "Which one of the following statements MUST be true?",
+                [
+                    "Dr Ash sits at the far left of the row.",
+                    "Dr Diaz sits next to Dr Frost.",
+                    "Dr Green sits next to Dr Hall.",
+                    "Dr Frost sits at the far right of the row.",
+                ],
+                "A",
+                "A is correct. Bell and Hall must initially occupy seats 4 and 6 around Evans. The remaining clues eliminate Bell in seat 4, so Hall is 4 and Bell is 6. Ash must therefore be as far from Bell as possible, in seat 1. Chen is 3, Green is 7, and Diaz and Frost can exchange seats 2 and 8. B is never true; C conflicts with the three-seat separation; D is possible but not necessary.",
+                "Hard",
+            ),
+        ],
+    ),
+    (
+        "DM", "Logic Puzzles & Arrangements", "Festival Supper Choices",
+        """Five organisers each chose one starter, one main course, one dessert and one drink. Across the five meals, the kitchen served:
+
+- **Starters:** 2 soups, 1 mushroom tart and 2 prawn salads
+- **Mains:** 2 pasta dishes, 2 fish dishes and 1 curry
+- **Desserts:** 2 fruit bowls, 2 crumbles and 1 meringue
+- **Drinks:** 1 coffee, 2 teas and 2 juices
+
+Four complete orders were recorded:
+
+- **Anita:** soup, pasta, fruit bowl and tea
+- **Bryn:** soup, fish, crumble and juice
+- **Callum:** prawn salad, fish, fruit bowl and tea
+- **Dara:** mushroom tart, pasta, crumble and juice
+
+Elena received the remaining item in each course.""",
+        [
+            _mcq(
+                "Which combination of main course and drink did Elena choose?",
+                ["Pasta and tea", "Fish and juice", "Curry and tea", "Curry and coffee"],
+                "D",
+                "D is correct. The four recorded mains account for both pasta dishes and both fish dishes, leaving the single curry for Elena. Their drinks account for both teas and both juices, leaving the single coffee. A and B use items whose full quantities are already assigned; C identifies the remaining main but not the remaining drink.",
+                "Medium",
+            ),
+        ],
+    ),
+    (
+        "DM", "Interpreting Information", "Community Project Volunteers",
+        """A charity will choose 20 volunteers from five departments. Exactly four people must come from each department, and the final team must contain ten men and ten women. Twenty-one people volunteered, so one group of volunteers will complete a selection task.
+
+| Department | Men | Women |
+|---|---|---|
+| Outreach | Aaron | |
+| Outreach | Ben | |
+| Outreach | | Chloe |
+| Outreach | | Dana |
+| Research | Ethan | |
+| Research | Faris | |
+| Research | | Grace |
+| Research | | Holly |
+| Logistics | Idris | |
+| Logistics | Jon | |
+| Logistics | | Kira |
+| Logistics | | Lena |
+| Design | Malik | |
+| Design | Noah | |
+| Design | | Orla |
+| Design | | Priya |
+| Administration | Quinn | |
+| Administration | Ravi | |
+| Administration | | Sara |
+| Administration | | Talia |
+| Administration | | Uma |""",
+        [
+            _mcq(
+                "Which volunteers must take the selection task?",
+                [
+                    "Quinn, Ravi and Sara",
+                    "Grace, Holly and Kira",
+                    "Sara, Talia and Uma",
+                    "Orla, Priya and Uma",
+                ],
+                "C",
+                "C is correct. Outreach, Research, Logistics and Design each already provide exactly two men and two women, totalling eight of each. Administration must therefore supply two men and two women. Its two male volunteers are both required, while its three female volunteers compete for the two female places, so Sara, Talia and Uma take the task. A mixes required and competing volunteers; B and D combine people from departments with no excess.",
+                "Medium",
+            ),
+        ],
+    ),
+    (
+        "DM", "Interpreting Information", "Commuter Reliability Study",
+        """During a workplace trial, every 4-minute reduction in average peak journey time was associated with a 10% relative reduction in the chance of arriving late. The table reports each intervention's average effect. Figures for the combined package are measured directly and must not be calculated by adding individual rows.
+
+| Intervention | Peak-time change | Off-peak change | Trial recommendation |
+|---|---:|---:|---|
+| Staggered start times | −8 min | −3 min | Begin work within a 45-minute window |
+| Subsidised bus pass | −5 min | −2 min | Use on at least 3 weekdays |
+| Protected cycling route | −4 min | −4 min | Route open during commuting hours |
+| Remote morning check-in | −2 min | −1 min | First meeting attended online |
+| Combined package | −6 min | −5 min | Use three or more interventions |""",
+        [
+            _mcq(
+                "For each conclusion, answer Yes only if it follows from the information above.",
+                [
+                    "On the trial relationship, an 8-minute peak-time reduction corresponds to a 20% relative reduction in the chance of arriving late.",
+                    "The cycling route would reduce an average off-peak journey from 48 minutes to 42 minutes.",
+                    "Of the listed individual interventions, staggered start times produced the largest peak-time reduction.",
+                    "The combined-package result proves that the individual interventions have an additive effect.",
+                    "Most rows show a greater reduction in peak journey time than in off-peak journey time.",
+                ],
+                "A,C,E",
+                "A Yes: 8 minutes contains two 4-minute reductions, corresponding to 20% on the stated trial relationship. B No: the listed off-peak reduction is 4 minutes, giving 44 minutes. C Yes: 8 minutes is the largest peak reduction among the four individual rows. D No: the passage explicitly says the combined result was measured and must not be obtained by addition. E Yes: four of the five rows have a larger peak reduction; the cycling row is equal.",
+                "Medium",
+            ),
+        ],
+    ),
+    (
+        "DM", "Venn Diagrams & Sets", "Holiday Booking Survey",
+        """In a survey, 30 respondents were asked whether they used a planning app, a comparison website or a telephone adviser to book a holiday.
+
+- 17 respondents used the planning app.
+- 6 respondents used all three methods.
+- Of respondents who used the planning app but not the comparison website, 40% also used the telephone adviser.
+
+In each option, the **pentagon** represents the planning app, the **triangle** the comparison website and the **circle** the telephone adviser. Numbers outside all three shapes represent respondents who used none of these methods.""",
+        [
+            _mcq(
+                "Which diagram could correctly represent all the survey data?",
+                [
+                    "Diagram A [[VISUAL:dm_shapes_a]]",
+                    "Diagram B [[VISUAL:dm_shapes_b]]",
+                    "Diagram C [[VISUAL:dm_shapes_c]]",
+                    "Diagram D [[VISUAL:dm_shapes_d]]",
+                ],
+                "D",
+                "D is correct. Its eight regions total 30; the pentagon contains 6 + 1 + 4 + 6 = 17; the triple overlap is 6; and among planning-app users outside the triangle, 4 of 6 + 4 = 10 also lie in the circle, which is 40%. A has the correct pentagon total but 4 of 11 is not 40%; B makes that share 6 of 10; C places 19 people in the pentagon.",
+                "Hard",
+            ),
+        ],
+    ),
     (
         "DM", "Venn Diagrams & Sets", "Community Skills Programme",
         """Six workshops were offered at a community skills programme. Each outline in the diagram represents everyone who attended that workshop; overlaps represent attendance at more than one workshop.
@@ -1005,6 +1106,9 @@ DM_VISUAL_PASSAGE_SETS = [
         ],
     ),
 ]
+
+
+DM_MULTI_PASSAGE_TITLES = {"Commuter Reliability Study"}
 
 
 DM_YESNO_QUESTIONS = [
@@ -1067,18 +1171,6 @@ DM_YESNO_QUESTIONS = [
         "A,B,C,E",
         "A Yes: the stated music workshops require booking. B Yes: booked and free are mutually exclusive. C Yes: those booked music events cannot be free and therefore cannot be outdoor. D No: booking may be required for other reasons. E Yes: outdoor implies free, while evening implies booked and no free event is booked.",
         "Hard",
-    ),
-    (
-        "DM", "Syllogisms & Logical Deduction",
-        "Every ceramic sample is fragile. Some fragile samples are insured. No insured sample is stored on shelf Z. All blue samples are stored on shelf Z. For each conclusion, answer Yes only if it necessarily follows.",
-        "No blue sample is insured.",
-        "Some fragile samples are not stored on shelf Z.",
-        "Every ceramic sample is insured.",
-        "Some insured samples are fragile.",
-        "No ceramic sample is blue.",
-        "A,B,D",
-        "A Yes: blue implies shelf Z and insured excludes shelf Z. B Yes: the insured fragile samples cannot be on Z. C No: fragile does not imply insured. D Yes: it restates the given overlap. E No: a ceramic sample may be blue if it is fragile but uninsured.",
-        "Medium",
     ),
 ]
 
@@ -1695,7 +1787,7 @@ SJT_PASSAGE_SETS.extend([
 ])
 
 
-PASSAGE_SETS = (list(VR_PASSAGE_SETS) + list(DM_VISUAL_PASSAGE_SETS)
+PASSAGE_SETS = (list(VR_PASSAGE_SETS) + list(DM_PASSAGE_SETS)
                 + list(QR_PASSAGE_SETS) + list(SJT_PASSAGE_SETS))
 STANDALONE_QUESTIONS = list(DM_STANDALONE_QUESTIONS) + list(QR_STANDALONE_QUESTIONS)
 
@@ -1703,6 +1795,11 @@ STANDALONE_QUESTIONS = list(DM_STANDALONE_QUESTIONS) + list(QR_STANDALONE_QUESTI
 # migration retires rather than deletes them so historical attempts remain
 # intact while the exact active mock counts do not grow after deployment.
 RETIRED_QUESTION_STEMS = {
+    "Five talks—J, K, L, M and N—are scheduled one per slot from 1 to 5. J is earlier than L. K is immediately after M. N is not in slot 1 or 5. L is not adjacent to K. Which schedule could be valid?",
+    "A panel selects exactly three of five proposals: A, B, C, D and E. If A is selected, B is selected. C and D cannot both be selected. At least one of D or E is selected. If E is selected, C is selected. Which selection is possible?",
+    "A warehouse has 180 parcels. Ninety-eight are fragile, 76 are express and 64 are insured. Forty are fragile and express, 35 are fragile and insured, 29 are express and insured, and 18 have all three labels. How many have exactly one of the three labels?",
+    "Four trains leave Westport for Eastbay. Train A leaves 08:10 and takes 74 minutes. B leaves 08:25 and takes 61 minutes. C leaves 08:40 and takes 55 minutes. D leaves 08:50 and takes 48 minutes. A passenger reaches Westport at 08:22 and needs 4 minutes to board. Which available train arrives first?",
+    "Every ceramic sample is fragile. Some fragile samples are insured. No insured sample is stored on shelf Z. All blue samples are stored on shelf Z. For each conclusion, answer Yes only if it necessarily follows.",
     "Among 120 staff, 68 hold first-aid certification, 54 hold fire-safety certification and 49 hold manual-handling certification. Inclusive overlaps are 25 first-aid/fire, 22 first-aid/manual and 20 fire/manual; 8 hold all three. How many hold only first-aid certification?",
     "In a group of 96 students, 51 study French, 44 study German and 38 study Spanish. Twenty study both French and German, 18 both French and Spanish, 16 both German and Spanish, and 9 study all three. How many study none of the three languages?",
     "Every coral marker is waterproof. No waterproof marker is made of paper. Some red markers are coral markers. For each conclusion, answer Yes only if it necessarily follows.",

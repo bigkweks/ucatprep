@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17243a;
+      --muted: #667085;
+      --line: #d9d7d1;
+      --paper: #fbfaf7;
+      --target: #e4e1dc;
+      --navy: #18345f;
+      --yes: #1d6a54;
+      --no: #9b493d;
+      --focus: #2b68b2;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: transparent; font-family: Inter, Arial, sans-serif; color: var(--ink); }
+    .shell { width: 100%; padding: 2px 1px 8px; }
+    .instructions { margin: 0 0 12px; color: var(--muted); font-size: 14px; line-height: 1.45; }
+    .source-row { display: flex; align-items: center; gap: 10px; margin: 0 0 13px; }
+    .source-label { color: var(--muted); font-size: 13px; margin-right: 2px; }
+    .tile {
+      min-width: 82px; min-height: 42px; border: 1px solid #8f8a82; border-radius: 7px;
+      background: white; color: var(--ink); font-weight: 750; font-size: 15px;
+      cursor: grab; user-select: none; touch-action: none; box-shadow: 0 2px 0 rgba(23,36,58,.08);
+    }
+    .tile:active { cursor: grabbing; }
+    .tile.selected { outline: 3px solid rgba(43,104,178,.22); border-color: var(--focus); }
+    .rows { display: grid; gap: 10px; }
+    .statement-row {
+      display: grid; grid-template-columns: minmax(0,1fr) 112px; gap: 10px;
+      align-items: stretch;
+    }
+    .statement {
+      border: 1px solid var(--line); border-radius: 8px; background: var(--paper);
+      min-height: 58px; padding: 12px 14px; display: flex; align-items: center;
+      font-size: 14px; line-height: 1.4;
+    }
+    .letter { font-weight: 800; margin-right: 8px; color: var(--navy); }
+    .drop {
+      border: 2px dashed #aaa49b; border-radius: 8px; background: var(--target);
+      color: #6c6963; font-size: 14px; font-weight: 800; cursor: pointer;
+      transition: border-color .12s ease, background .12s ease, transform .12s ease;
+    }
+    .drop.over { border-color: var(--focus); background: #e7eef8; transform: translateY(-1px); }
+    .drop.yes { border-style: solid; border-color: var(--yes); background: #e8f4ef; color: var(--yes); }
+    .drop.no { border-style: solid; border-color: var(--no); background: #f8ece9; color: var(--no); }
+    button:focus-visible { outline: 3px solid rgba(43,104,178,.28); outline-offset: 2px; }
+    .footer { min-height: 26px; margin-top: 8px; display: flex; justify-content: space-between; align-items: center; }
+    .status { color: var(--muted); font-size: 12px; }
+    .clear { border: 0; background: transparent; color: #315f7d; font-weight: 700; cursor: pointer; padding: 5px 2px; }
+    @media (max-width: 620px) {
+      .statement-row { grid-template-columns: 1fr 92px; gap: 7px; }
+      .statement { padding: 10px; font-size: 13px; }
+      .tile { min-width: 70px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <p class="instructions">Drag <strong>Yes</strong> or <strong>No</strong> onto every statement. You can also select a tile, then click a target.</p>
+    <div class="source-row" aria-label="Answer tiles">
+      <span class="source-label">Answer tiles</span>
+      <button class="tile" draggable="true" data-value="Y" type="button">Yes</button>
+      <button class="tile" draggable="true" data-value="N" type="button">No</button>
+    </div>
+    <section class="rows" aria-live="polite"></section>
+    <div class="footer"><span class="status"></span><button class="clear" type="button">Clear all</button></div>
+  </main>
+  <script>
+    const state = { answers: {}, selected: null, initializedFor: null, statements: [] };
+    let pointerDrag = null;
+    let mouseDrag = null;
+
+    function post(type, payload = {}) {
+      window.parent.postMessage({ isStreamlitMessage: true, type, ...payload }, "*");
+    }
+    function setHeight() {
+      post("streamlit:setFrameHeight", { height: document.documentElement.scrollHeight });
+    }
+    function currentValue() {
+      const complete = state.statements.length > 0 && state.statements.every(s => state.answers[s.letter]);
+      const yes = state.statements.filter(s => state.answers[s.letter] === "Y").map(s => s.letter).join(",");
+      return { complete, yes };
+    }
+    function emitValue() {
+      post("streamlit:setComponentValue", { value: currentValue(), dataType: "json" });
+    }
+    function chooseTile(value) {
+      state.selected = value;
+      document.querySelectorAll(".tile").forEach(el => el.classList.toggle("selected", el.dataset.value === value));
+    }
+    function assign(letter, value) {
+      if (!value) return;
+      state.answers[letter] = value;
+      renderRows();
+      emitValue();
+    }
+    function renderRows() {
+      const rows = document.querySelector(".rows");
+      rows.replaceChildren();
+      for (const item of state.statements) {
+        const row = document.createElement("div");
+        row.className = "statement-row";
+
+        const statement = document.createElement("div");
+        statement.className = "statement";
+        const letter = document.createElement("span");
+        letter.className = "letter";
+        letter.textContent = item.letter + ".";
+        const wording = document.createElement("span");
+        wording.textContent = item.text;
+        statement.append(letter, wording);
+
+        const target = document.createElement("button");
+        target.type = "button";
+        target.className = "drop";
+        target.dataset.letter = item.letter;
+        const answer = state.answers[item.letter];
+        if (answer === "Y") target.classList.add("yes");
+        if (answer === "N") target.classList.add("no");
+        target.textContent = answer === "Y" ? "Yes" : answer === "N" ? "No" : "Drop here";
+        target.setAttribute("aria-label", `${item.letter}. ${item.text}: ${target.textContent}`);
+        target.addEventListener("dragover", event => { event.preventDefault(); target.classList.add("over"); });
+        target.addEventListener("dragleave", () => target.classList.remove("over"));
+        target.addEventListener("mouseup", () => {
+          if (mouseDrag) assign(item.letter, mouseDrag);
+        });
+        target.addEventListener("pointerup", () => {
+          if (pointerDrag) assign(item.letter, pointerDrag.value);
+        });
+        target.addEventListener("drop", event => {
+          event.preventDefault();
+          target.classList.remove("over");
+          assign(item.letter, event.dataTransfer.getData("text/plain") || state.selected);
+        });
+        target.addEventListener("click", () => {
+          if (state.selected) assign(item.letter, state.selected);
+          else if (answer) assign(item.letter, answer === "Y" ? "N" : "Y");
+        });
+        row.append(statement, target);
+        rows.append(row);
+      }
+      const answered = Object.keys(state.answers).length;
+      document.querySelector(".status").textContent = answered === state.statements.length
+        ? "All statements answered" : `${answered} of ${state.statements.length} answered`;
+      requestAnimationFrame(setHeight);
+    }
+
+    document.querySelectorAll(".tile").forEach(tile => {
+      tile.addEventListener("dragstart", event => {
+        chooseTile(tile.dataset.value);
+        event.dataTransfer.setData("text/plain", tile.dataset.value);
+        event.dataTransfer.effectAllowed = "copy";
+      });
+      tile.addEventListener("dragend", event => {
+        const beneath = document.elementFromPoint(event.clientX, event.clientY);
+        const target = beneath?.closest?.(".drop");
+        if (target?.dataset.letter) assign(target.dataset.letter, tile.dataset.value);
+      });
+      tile.addEventListener("pointerdown", event => {
+        pointerDrag = { pointerId: event.pointerId, value: tile.dataset.value };
+        chooseTile(tile.dataset.value);
+        try { tile.setPointerCapture(event.pointerId); } catch (_error) { /* native drag remains available */ }
+      });
+      tile.addEventListener("mousedown", () => {
+        mouseDrag = tile.dataset.value;
+        chooseTile(tile.dataset.value);
+      });
+      tile.addEventListener("pointerup", event => {
+        if (!pointerDrag || pointerDrag.pointerId !== event.pointerId) return;
+        const beneath = document.elementFromPoint(event.clientX, event.clientY);
+        const target = beneath?.closest?.(".drop");
+        if (target?.dataset.letter) assign(target.dataset.letter, pointerDrag.value);
+        try { tile.releasePointerCapture(event.pointerId); } catch (_error) { /* already released */ }
+        pointerDrag = null;
+      });
+      tile.addEventListener("pointercancel", () => { pointerDrag = null; });
+      tile.addEventListener("click", () => chooseTile(tile.dataset.value));
+    });
+    document.addEventListener("mouseup", () => setTimeout(() => { mouseDrag = null; }, 0));
+    document.querySelector(".clear").addEventListener("click", () => {
+      state.answers = {};
+      state.selected = null;
+      document.querySelectorAll(".tile").forEach(el => el.classList.remove("selected"));
+      renderRows();
+      emitValue();
+    });
+
+    window.addEventListener("message", event => {
+      if (event.data?.type !== "streamlit:render") return;
+      const args = event.data.args || {};
+      state.statements = Array.isArray(args.statements) ? args.statements : [];
+      const identity = String(args.widget_id || "default");
+      if (state.initializedFor !== identity) {
+        state.answers = {};
+        state.selected = null;
+        if (args.previous !== null && args.previous !== undefined) {
+          const yes = new Set(String(args.previous).split(",").filter(Boolean));
+          for (const item of state.statements) state.answers[item.letter] = yes.has(item.letter) ? "Y" : "N";
+        }
+        state.initializedFor = identity;
+      }
+      renderRows();
+    });
+
+    post("streamlit:componentReady", { apiVersion: 1 });
+    setHeight();
+  </script>
+</body>
+</html>

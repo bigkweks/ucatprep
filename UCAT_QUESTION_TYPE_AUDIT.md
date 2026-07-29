@@ -32,6 +32,10 @@ The official practice materials state that their questions are representative of
 ## Gaps corrected
 
 - Added an original hard five-statement Yes/No syllogism using exclusive categories, a proper subset, existence and a cardinality inference.
+- Added an original eight-person seating puzzle with a rendered row-and-camera diagram and a `MUST be true` answer format.
+- Added long-form meal-allocation and department-selection puzzles, including a dense 21-person source table.
+- Added a passage-linked data table followed by five conclusions, with Yes and No placed separately against every statement.
+- Added a survey item with four compound pentagon/triangle/circle answer diagrams and regional counts.
 - Added a six-outline region-identification diagram at the complexity level of the supplied official example.
 - Added a choose-the-correct-Venn-diagram item with four rendered answer diagrams, including overlap, disjoint-set and outside-set reasoning.
 - Replaced a four-question QR data set with four standalone QR questions covering scale conversion, mixture replacement, rate/percentage yield and whole-unit rounding.
@@ -55,7 +59,7 @@ Difficulty was benchmarked structurally against the official practice materials:
 
 - Exact active counts: VR 44, DM 35, QR 36, SJT 69; total 184.
 - Independent QR arithmetic checks and enumerated/formal DM logic checks.
-- Independent geometry/set-arithmetic checks for both new DM visual questions.
+- Independent permutation, inventory, table-inference, geometry and set-arithmetic checks for every new DM format.
 - Answer-position balance, option count, explanation completeness and duplicate-stem checks.
 - Fresh-database seed and retirement migration smoke test.
 - Python compilation and Git whitespace validation.

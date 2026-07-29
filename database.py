@@ -3578,6 +3578,7 @@ from question_bank import (
     PASSAGE_SETS as _REWRITTEN_PASSAGE_SETS,
     STANDALONE_QUESTIONS as _REWRITTEN_STANDALONE_QUESTIONS,
     DM_YESNO_QUESTIONS as _REWRITTEN_DM_YESNO_QUESTIONS,
+    DM_MULTI_PASSAGE_TITLES as _REWRITTEN_DM_MULTI_PASSAGE_TITLES,
     RETIRED_QUESTION_STEMS as _REWRITTEN_RETIRED_STEMS,
 )
 
@@ -3585,6 +3586,7 @@ _QUESTIONS = []
 _PASSAGE_SETS = _REWRITTEN_PASSAGE_SETS
 _STANDALONE_QUESTIONS = _REWRITTEN_STANDALONE_QUESTIONS
 _DM_YESNO_QUESTIONS = _REWRITTEN_DM_YESNO_QUESTIONS
+_DM_MULTI_PASSAGE_TITLES = set(_REWRITTEN_DM_MULTI_PASSAGE_TITLES)
 
 _CURRENT_SEEDED_STEMS = (
     {q[0] for _code, _topic, _title, _body, questions in _PASSAGE_SETS for q in questions}
@@ -3807,7 +3809,12 @@ def _sync_content(conn, code_to_id, topic_key_to_id):
             # The existing `multi` storage represents any response with more
             # than one selected component. DM uses a set of Yes statements;
             # SJT stores an ordered most,least pair. This preserves the schema.
-            fmt = "multi" if code == "SJT" and "," in unpacked[6] else "single"
+            fmt = (
+                "multi"
+                if ((code == "SJT" and "," in unpacked[6])
+                    or (code == "DM" and title in _DM_MULTI_PASSAGE_TITLES))
+                else "single"
+            )
             upsert_q(code, tname, pid, qt, fmt=fmt)
         # Retire any stale questions still attached to this passage whose stem is
         # no longer in the current set (e.g. a question that was reworded), so an
